@@ -3846,9 +3846,8 @@ void load_background(char *filename)
     unload_background();
 
     // Attempt to load 8bit color depth background. If it fails,
-    // then attempt to load 24bit color depth background. If THAT
-    // fails, something is wrong and we better shut down to avoid
-    // a crash.
+    // then attempt to load 32bit color depth background. Legacy GIF
+    // backgrounds are skipped with a blank screen (OpenBOR 4.0 is PNG-only).
     if(!loadscreen(filename, packfile, NULL, PIXEL_x8, &background))
     {
         if (loadscreen32(filename, packfile, &background))
@@ -3857,7 +3856,13 @@ void load_background(char *filename)
         }
         else
         {
-            borShutdown(1, "Error loading background (PIXEL_x8/PIXEL_32) file '%s'", filename);
+            printf("Warning: unable to load background '%s' (PNG required), using blank screen\n", filename);
+            background = allocscreen(videomodes.hRes, videomodes.vRes, pixelformat);
+            if(!background)
+            {
+                borShutdown(1, "Error loading background (PIXEL_x8/PIXEL_32) file '%s'", filename);
+            }
+            clearscreen(background);
         }
     }
 

@@ -27,7 +27,12 @@ jobs:
           fetch-depth: 0
 
       - name: Build devcontainer image
-        run: docker build -t openbor-build -f .devcontainer/Dockerfile .devcontainer
+        run: |
+          if [ "${{ inputs.target }}" = "wii" ]; then
+            docker build -t openbor-build -f .devcontainer/Dockerfile.wii .devcontainer
+          else
+            docker build -t openbor-build -f .devcontainer/Dockerfile .devcontainer
+          fi
 
       - name: Build OpenBOR (all targets)
         if: inputs.target == 'all'

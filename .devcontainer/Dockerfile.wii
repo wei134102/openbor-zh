@@ -1,0 +1,15 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DEVKITPRO=/opt/devkitpro
+ENV WORKSPACE=/workspace
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl git bash make cmake build-essential zstd gnupg && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY installDevkitPro.sh /tmp/installDevkitPro.sh
+RUN chmod +x /tmp/installDevkitPro.sh && /tmp/installDevkitPro.sh && rm -f /tmp/installDevkitPro.sh
+
+WORKDIR /workspace

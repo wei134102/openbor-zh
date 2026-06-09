@@ -575,7 +575,8 @@ int ControlMenu()
 			break;
 
 		case WIIMOTE_PLUS:
-		case WIIMOTE_2:
+		case WIIMOTE_1:
+		case WIIMOTE_A:
 		case CC_PLUS:
 		case CC_A:
 		case GC_START:
@@ -591,7 +592,7 @@ int ControlMenu()
 			status = 2;
 			break;
 
-		case WIIMOTE_1:
+		case WIIMOTE_2:
 		case CC_X:
 		case GC_X:
 			status = 3;

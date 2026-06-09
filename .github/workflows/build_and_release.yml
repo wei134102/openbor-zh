@@ -1,73 +1,110 @@
 name: Build OpenBOR
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - wii
+          - linux-amd64
 
 jobs:
-  Build:
-    name: ${{ matrix.platform.name }}
-    runs-on: ${{ matrix.platform.os }}
-
-    defaults:
-      run:
-        shell: ${{ matrix.platform.shell }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-        - { name: Windows-x86, os: windows-latest, shell: 'msys2 {0}', msystem: mingw32, msys-env: mingw-w64-i686 }
-        - { name: Windows-x64, os: windows-latest, shell: 'msys2 {0}', msystem: ucrt64,  msys-env: mingw-w64-ucrt-x86_64 }
-        - { name: Ubuntu-x64,  os: ubuntu-latest,  shell: sh }
-        - { name: MacOS,       os: macos-latest,   shell: sh }
+  build-docker:
+    name: Docker build (${{ inputs.target }})
+    if: inputs.target == 'all' || inputs.target == 'wii'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-    - name: Set up MSYS2
-      if: matrix.platform.shell == 'msys2 {0}'
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: ${{ matrix.platform.msystem }}
-        install: >-
-          git
-          ${{ matrix.platform.msys-env }}-gcc
-          ${{ matrix.platform.msys-env }}-cmake
-          ${{ matrix.platform.msys-env }}-SDL2
-          ${{ matrix.platform.msys-env }}-zlib
-          ${{ matrix.platform.msys-env }}-libvorbis
-          ${{ matrix.platform.msys-env }}-libogg
-          ${{ matrix.platform.msys-env }}-libpng
-          ${{ matrix.platform.msys-env }}-libvpx
-    - name: Setup Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install build-essential git cmake zstd \
-          libsdl2-dev libvorbis-dev libpng-dev libvpx-dev
-    - name: Setup Macos dependencies
-      if: runner.os == 'macOS'
-      run: |
-        brew install \
-          SDL2 \
-          libvorbis \
-          libogg \
-          libvpx
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-    - name: Configure
-      run: |
-        ${{ matrix.platform.source_cmd }}
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-        ${{ matrix.platform.cmake }}
-    - name: Build
-      run: |
-        ${{ matrix.platform.source_cmd }}
-        cmake --build build/ --config Release --verbose --parallel
-    - name: Version
-      id: vars
-      run: echo "version_name=$(cat engine/version.txt)" >> $GITHUB_ENV
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Upload
-      uses: actions/upload-artifact@v4
-      with:
-        name: "${{ env.version_name }}_${{ matrix.platform.name }}"
-        path: engine/releases/
+      - name: Build devcontainer image
+        run: docker build -t openbor-build -f .devcontainer/Dockerfile .devcontainer
+
+      - name: Build OpenBOR (all targets)
+        if: inputs.target == 'all'
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            openbor-build \
+            ./build-all.sh
+
+      - name: Build OpenBOR (Wii only)
+        if: inputs.target == 'wii'
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            openbor-build \
+            bash -lc 'rm -rf build.wii && mkdir build.wii && cd build.wii && \
+              $DEVKITPRO/portlibs/wii/bin/powerpc-eabi-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_WII=ON .. && \
+              make -j $(nproc)'
+
+      - name: Verify build outputs
+        run: |
+          test -f engine/releases/WII/boot.dol
+          echo "WII boot.dol: OK ($(wc -c < engine/releases/WII/boot.dol) bytes)"
+          if [ "${{ inputs.target }}" = "all" ]; then
+            test -d engine/releases/LINUX
+            test -d engine/releases/WINDOWS
+            test -d engine/releases/DARWIN
+            echo "LINUX / WINDOWS / DARWIN: OK"
+          fi
+
+      - name: Read version
+        id: version
+        run: echo "version_name=$(cat engine/version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openbor_${{ steps.version.outputs.version_name }}_${{ inputs.target }}
+          path: engine/releases/
+          if-no-files-found: error
+
+  build-linux-amd64:
+    name: Linux AMD64 (native)
+    if: inputs.target == 'all' || inputs.target == 'linux-amd64'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git cmake zstd \
+            libsdl2-dev libvorbis-dev libpng-dev libvpx-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_LINUX=ON -DTARGET_ARCH=AMD64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Verify build output
+        run: |
+          test -f engine/releases/LINUX/AMD64/OpenBOR
+          echo "LINUX AMD64 OpenBOR: OK"
+
+      - name: Read version
+        id: version
+        run: echo "version_name=$(cat engine/version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openbor_${{ steps.version.outputs.version_name }}_linux-amd64
+          path: engine/releases/LINUX/AMD64/
+          if-no-files-found: error

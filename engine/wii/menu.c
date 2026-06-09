@@ -17,6 +17,8 @@
 #include "control.h"
 #include "packfile.h"
 #include "hankaku.h"
+#include "menufont.h"
+#include "menustrings.h"
 #include "stristr.h"
 
 #include "pngdec.h"
@@ -246,17 +248,16 @@ void refreshInput()
 		if(wpad->btns_h & WPAD_CLASSIC_BUTTON_ZL)             btns |= CC_ZL;
 		if(wpad->btns_h & WPAD_CLASSIC_BUTTON_ZR)             btns |= CC_ZR;
 	}
-	else
-	{
-		if(gcbtns & PAD_BUTTON_X)                             btns |= GC_X;
-		if(gcbtns & PAD_BUTTON_Y)                             btns |= GC_Y;
-		if(gcbtns & PAD_BUTTON_A)                             btns |= GC_A;
-		if(gcbtns & PAD_BUTTON_B)                             btns |= GC_B;
-		if(gcbtns & PAD_TRIGGER_R)                            btns |= GC_R;
-		if(gcbtns & PAD_TRIGGER_L)                            btns |= GC_L;
-		if(gcbtns & PAD_TRIGGER_Z)                            btns |= GC_Z;
-		if(gcbtns & PAD_BUTTON_START)                         btns |= GC_START;
-	}
+
+	// GameCube face buttons always available (Nintendont-style merge)
+	if(gcbtns & PAD_BUTTON_X)                             btns |= GC_X;
+	if(gcbtns & PAD_BUTTON_Y)                             btns |= GC_Y;
+	if(gcbtns & PAD_BUTTON_A)                             btns |= GC_A;
+	if(gcbtns & PAD_BUTTON_B)                             btns |= GC_B;
+	if(gcbtns & PAD_TRIGGER_R)                            btns |= GC_R;
+	if(gcbtns & PAD_TRIGGER_L)                            btns |= GC_L;
+	if(gcbtns & PAD_TRIGGER_Z)                            btns |= GC_Z;
+	if(gcbtns & PAD_BUTTON_START)                         btns |= GC_START;
 
 	// update buttons pressed (not held)
 	buttonsPressed = btns & ~buttonsHeld;
@@ -397,6 +398,42 @@ void drawScreens(s_screen *Image, int x, int y)
 	video_copy_screen(Screen);
 }
 
+static void drawMenuGlyph12(int x, int y, int col, int backcol, int fill, const unsigned short *glyph)
+{
+	int x1, y1;
+	unsigned long data;
+	unsigned short *line16 = NULL;
+	unsigned long  *line32 = NULL;
+
+	if(!glyph) return;
+
+	if(bpp == 16) line16 = (unsigned short *)Scaler->data + x + y * Scaler->width;
+	else          line32 = (unsigned long  *)Scaler->data + x + y * Scaler->width;
+
+	for(y1 = 0; y1 < MENUFONT_HEIGHT; y1++)
+	{
+		data = glyph[y1];
+		for(x1 = 0; x1 < MENUFONT_WIDTH; x1++)
+		{
+			if(data & (1 << (MENUFONT_WIDTH - 1 - x1)))
+			{
+				if(bpp == 16) *line16 = col;
+				else          *line32 = col;
+			}
+			else if(fill)
+			{
+				if(bpp == 16) *line16 = backcol;
+				else          *line32 = backcol;
+			}
+
+			if(bpp == 16) line16++;
+			else          line32++;
+		}
+		if(bpp == 16) line16 += Scaler->width - MENUFONT_WIDTH;
+		else          line32 += Scaler->width - MENUFONT_WIDTH;
+	}
+}
+
 void printText(int x, int y, int col, int backcol, int fill, char *format, ...)
 {
 	int x1, y1, i;
@@ -405,6 +442,7 @@ void printText(int x, int y, int col, int backcol, int fill, char *format, ...)
 	unsigned long  *line32 = NULL;
 	unsigned char *font;
 	unsigned char ch = 0;
+	const unsigned short *gbglyph = NULL;
 	char buf[128] = {""};
 	va_list arglist;
 		va_start(arglist, format);
@@ -412,13 +450,26 @@ void printText(int x, int y, int col, int backcol, int fill, char *format, ...)
 		va_end(arglist);
 	if(factor > 1){ y += 5; }
 
-	for(i=0; i<sizeof(buf); i++)
+	for(i = 0; i < (int)sizeof(buf) && buf[i]; )
 	{
-		ch = buf[i];
-		// mapping
+		ch = (unsigned char)buf[i];
+
+		if(ch >= 0x81 && buf[i + 1])
+		{
+			gbglyph = menu_font_lookup(ch, (unsigned char)buf[i + 1]);
+			if(gbglyph)
+			{
+				drawMenuGlyph12(x, y, col, backcol, fill, gbglyph);
+				x += MENUFONT_WIDTH;
+				i += 2;
+				continue;
+			}
+		}
+
+		// ASCII / half-width mapping
 		if (ch<0x20) ch = 0;
 		else if (ch<0x80) { ch -= 0x20; }
-		else if (ch<0xa0) {	ch = 0;	}
+		else if (ch<0xa0) { ch = 0; }
 		else ch -= 0x40;
 		font = (u8 *)&hankaku_font10[ch*10];
 		// draw
@@ -449,7 +500,8 @@ void printText(int x, int y, int col, int backcol, int fill, char *format, ...)
 			if (bpp == 16) line16 += Scaler->width-5;
 			else           line32 += Scaler->width-5;
 		}
-		x+=5;
+		x += 5;
+		i++;
 	}
 }
 
@@ -591,7 +643,7 @@ void drawMenu()
 	int clipX=0, clipY=0;
 
 	copyScreens(Source);
-	if(dListTotal < 1) printText((isWide ? 30 : 8), (isWide ? 33 : 24), RED, 0, 0, "No Mods In Paks Folder!");
+	if(dListTotal < 1) printText((isWide ? 30 : 8), (isWide ? 33 : 24), RED, 0, 0, MENU_STR_NO_MODS);
 	for(list=0; list<dListTotal; list++)
 	{
 		if(list < MAX_MODS_NUM)
@@ -621,10 +673,10 @@ void drawMenu()
 
 	printText((isWide ? 26 : 5), (isWide ? 11 : 4), WHITE, 0, 0, "OpenBoR %s", VERSION);
 	printText((isWide ? 392 : 261),(isWide ? 11 : 4), WHITE, 0, 0, __DATE__);
-	printText((isWide ? 23 : 4),(isWide ? 251 : 226), WHITE, 0, 0, "%s: Start Game", control_getkeyname(savedata.keys[0][SDID_ATTACK]));
-	printText((isWide ? 150 : 84),(isWide ? 251 : 226), WHITE, 0, 0, "%s: BGM Player", control_getkeyname(savedata.keys[0][SDID_ATTACK2]));
-	printText((isWide ? 270 : 164),(isWide ? 251 : 226), WHITE, 0, 0, "%s: View Logs", control_getkeyname(savedata.keys[0][SDID_JUMP]));
-	printText((isWide ? 390 : 244),(isWide ? 251 : 226), WHITE, 0, 0, "%s: Quit Game", control_getkeyname(savedata.keys[0][SDID_SPECIAL]));
+	printText((isWide ? 23 : 4),(isWide ? 251 : 226), WHITE, 0, 0, MENU_STR_START_GAME, control_getkeyname(savedata.keys[0][SDID_ATTACK]));
+	printText((isWide ? 150 : 84),(isWide ? 251 : 226), WHITE, 0, 0, MENU_STR_BGM_PLAYER, control_getkeyname(savedata.keys[0][SDID_ATTACK2]));
+	printText((isWide ? 270 : 164),(isWide ? 251 : 226), WHITE, 0, 0, MENU_STR_VIEW_LOGS, control_getkeyname(savedata.keys[0][SDID_JUMP]));
+	printText((isWide ? 390 : 244),(isWide ? 251 : 226), WHITE, 0, 0, MENU_STR_QUIT_GAME, control_getkeyname(savedata.keys[0][SDID_SPECIAL]));
    	printText((isWide ? 330 : 197),(isWide ? 170 : 155), BLACK, 0, 0, "www.LavaLit.com");
 	printText((isWide ? 322 : 190),(isWide ? 180 : 165), BLACK, 0, 0, "www.SenileTeam.com");
 
@@ -659,7 +711,7 @@ void drawLogs()
 	    copyScreens(Viewer);
 	    //inputrefresh(0);
 	    refreshInput();
-	    printText((isWide ? 410 : 250), 3, RED, 0, 0, "Quit : 1/B");
+	    printText((isWide ? 410 : 250), 3, RED, 0, 0, MENU_STR_QUIT_HINT);
 		if(buttonsPressed & (WIIMOTE_1|CC_B|GC_B)) done = 1;
 
 		if(logfile[i].ready)
@@ -689,8 +741,8 @@ void drawLogs()
 				else break;
 			}
 		}
-		else if(i == SCRIPT_LOG) printText(5, 3, RED, 0, 0, "Log NOT Found: ScriptLog.txt");
-		else                     printText(5, 3, RED, 0, 0, "Log NOT Found: OpenBorLog.txt");
+		else if(i == SCRIPT_LOG) printText(5, 3, RED, 0, 0, MENU_STR_SCRIPT_LOG_NF);
+		else                     printText(5, 3, RED, 0, 0, MENU_STR_LOG_NOT_FOUND);
 
 	    drawScreens(NULL, 0, 0);
 	}

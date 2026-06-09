@@ -1,5 +1,6 @@
 # Extra OpenBOR Wii dependencies on top of the official devkitPro image.
-FROM devkitpro/devkitppc:latest
+# Pin before libogc 3.0 / Tuxedo (Jan 2026), which breaks many homebrew builds.
+FROM devkitpro/devkitppc:20251231
 
 ENV WORKSPACE=/workspace
 

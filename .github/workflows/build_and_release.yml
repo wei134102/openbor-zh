@@ -46,13 +46,27 @@ jobs:
       - name: Build OpenBOR (Wii only)
         if: inputs.target == 'wii'
         run: |
+          mkdir -p engine/releases
+          set -o pipefail
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             openbor-wii \
-            bash -lc 'rm -rf build.wii && mkdir build.wii && cd build.wii && \
-              $DEVKITPRO/portlibs/wii/bin/powerpc-eabi-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_WII=ON .. && \
-              make -j $(nproc)'
+            bash -lc 'set -euxo pipefail
+              rm -rf build.wii
+              mkdir -p build.wii engine/releases
+              cd build.wii
+              $DEVKITPRO/portlibs/wii/bin/powerpc-eabi-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_WII=ON ..
+              make -j "$(nproc)" 2>&1 | tee ../build.wii.log'
+          test -f build.wii.log
+
+      - name: Upload Wii build log on failure
+        if: failure() && inputs.target == 'wii'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_wii_log
+          path: build.wii.log
+          if-no-files-found: ignore
 
       - name: Verify build outputs
         run: |

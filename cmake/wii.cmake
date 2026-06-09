@@ -35,6 +35,7 @@ ogc_create_dol(${PROJECT_NAME})
 # Distribution Preperation
 add_custom_command(TARGET ${PROJECT_NAME}
   POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory ../engine/releases
   COMMAND ${CMAKE_COMMAND} -E make_directory ../engine/releases/WII/Logs
   COMMAND ${CMAKE_COMMAND} -E make_directory ../engine/releases/WII/Paks
   COMMAND ${CMAKE_COMMAND} -E make_directory ../engine/releases/WII/Saves

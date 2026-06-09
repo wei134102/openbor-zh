@@ -226,10 +226,11 @@ endif()
 # Distribution Preperation
 add_custom_command(TARGET ${PROJECT_NAME}
   POST_BUILD
-  COMMAND cp -a ../engine/COMPILING ../engine/releases/COMPILING.txt
-  COMMAND cp -a ../engine/LICENSE ../engine/releases/LICENSE.txt
-  COMMAND cp -a ../engine/README ../engine/releases/README.txt
-  COMMAND cp -a ../engine/translation.txt ../engine/releases/
+  COMMAND ${CMAKE_COMMAND} -E make_directory ../engine/releases
+  COMMAND ${CMAKE_COMMAND} -E copy ../engine/COMPILING ../engine/releases/COMPILING.txt
+  COMMAND ${CMAKE_COMMAND} -E copy ../engine/LICENSE ../engine/releases/LICENSE.txt
+  COMMAND ${CMAKE_COMMAND} -E copy ../engine/README ../engine/releases/README.txt
+  COMMAND ${CMAKE_COMMAND} -E copy ../engine/translation.txt ../engine/releases/
 )
 
 # Debug CMake Variables

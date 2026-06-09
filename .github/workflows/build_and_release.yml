@@ -26,13 +26,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build devcontainer image
-        run: |
-          if [ "${{ inputs.target }}" = "wii" ]; then
-            docker build -t openbor-build -f .devcontainer/Dockerfile.wii .devcontainer
-          else
-            docker build -t openbor-build -f .devcontainer/Dockerfile .devcontainer
-          fi
+      - name: Build OpenBOR Wii image
+        if: inputs.target == 'wii'
+        run: docker build -t openbor-wii -f .devcontainer/Dockerfile.wii .devcontainer
+
+      - name: Build devcontainer image (all targets)
+        if: inputs.target == 'all'
+        run: docker build -t openbor-build -f .devcontainer/Dockerfile .devcontainer
 
       - name: Build OpenBOR (all targets)
         if: inputs.target == 'all'
@@ -49,7 +49,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
-            openbor-build \
+            openbor-wii \
             bash -lc 'rm -rf build.wii && mkdir build.wii && cd build.wii && \
               $DEVKITPRO/portlibs/wii/bin/powerpc-eabi-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_WII=ON .. && \
               make -j $(nproc)'

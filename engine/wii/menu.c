@@ -1068,9 +1068,9 @@ static int wii_hd_video_prompt(int hres, int vres)
 	{
 		copyScreens(Source);
 		printText((isWide ? 40 : 12), (isWide ? 60 : 50), YELLOW, 0, 0, MENU_STR_HD_TITLE);
-		printText((isWide ? 40 : 12), (isWide ? 80 : 70), WHITE, 0, 0, MENU_STR_HD_INFO, hres, vres);
+		printText((isWide ? 40 : 12), (isWide ? 80 : 70), ORANGE, 0, 0, MENU_STR_HD_INFO, hres, vres);
 		printText((isWide ? 40 : 12), (isWide ? 110 : 100), GREEN, 0, 0, MENU_STR_HD_YES);
-		printText((isWide ? 40 : 12), (isWide ? 130 : 120), WHITE, 0, 0, MENU_STR_HD_NO);
+		printText((isWide ? 40 : 12), (isWide ? 130 : 120), PURPLE, 0, 0, MENU_STR_HD_NO);
 		drawScreens(NULL, 0, 0);
 
 		refreshInput();

@@ -464,10 +464,10 @@ void printText(int x, int y, int col, int backcol, int fill, char *format, ...)
 			if(gbglyph)
 			{
 				drawMenuGlyph12(x, y, col, backcol, fill, gbglyph);
+				x += MENUFONT_WIDTH;
+				i += 2;
+				continue;
 			}
-			x += MENUFONT_WIDTH;
-			i += 2;
-			continue;
 		}
 
 		// ASCII / half-width mapping
@@ -541,48 +541,6 @@ s_screen *getPreview(char *filename)
 	// Free Images and Terminate FileCaching
 	if(title) freescreen(&title); //free image screen
 	return scale; // return scaled down screen
-}
-
-static void copy_pak_display_name(char *dest, size_t destsize, const char *filename)
-{
-	size_t di = 0;
-	size_t si = 0;
-	int pixels = 0;
-	int max_pixels = isWide ? 240 : 136;
-	size_t end = strlen(filename);
-
-	if(end > 4)
-	{
-		end -= 4;
-	}
-
-	while(si < end && di + 2 < destsize)
-	{
-		unsigned char c = (unsigned char)filename[si];
-		int char_width = 5;
-
-		if(c >= 0x81 && si + 1 < end)
-		{
-			char_width = MENUFONT_WIDTH;
-			if(pixels + char_width > max_pixels)
-			{
-				break;
-			}
-			dest[di++] = filename[si++];
-			dest[di++] = filename[si++];
-		}
-		else
-		{
-			if(pixels + char_width > max_pixels)
-			{
-				break;
-			}
-			dest[di++] = filename[si++];
-		}
-		pixels += char_width;
-	}
-
-	dest[di] = '\0';
 }
 
 static int hold_key_impulse(int key, float time_range, int start_press_flag, float start_time_eta)
@@ -829,7 +787,11 @@ void drawMenu()
 		{
 			shift = 0;
 			colors = GRAY;
-			copy_pak_display_name(listing, sizeof(listing), filelist[list+dListScrollPosition].filename);
+			strncpy(listing, "", (isWide ? 44 : 28));
+			if(strlen(filelist[list+dListScrollPosition].filename)-4 < (isWide ? 44 : 28))
+				safe_strncpy(listing, filelist[list+dListScrollPosition].filename, strlen(filelist[list+dListScrollPosition].filename)-4);
+			if(strlen(filelist[list+dListScrollPosition].filename)-4 > (isWide ? 44 : 28))
+				safe_strncpy(listing, filelist[list+dListScrollPosition].filename, (isWide ? 44 : 28));
 			if(list == dListCurrentPosition)
 			{
 				shift = 2;
@@ -989,6 +951,201 @@ void setVideoMode()
 
 	video_set_mode(videomodes);
 }
+
+#if WII
+/* Mode 0 (320x240) and mode 1 (480x272) are normal on Wii; HD mods use mode 2+ */
+#define WII_SAFE_VIDEO_PIXELS (480 * 272)
+
+static int wii_mode_pixels(int mode, int hres, int vres)
+{
+	if(mode == 255)
+	{
+		if(hres > 0 && vres > 0)
+		{
+			return hres * vres;
+		}
+		return WII_SAFE_VIDEO_PIXELS + 1;
+	}
+
+	switch(mode)
+	{
+	case 0: return 320 * 240;
+	case 1: return 480 * 272;
+	case 2: return 640 * 480;
+	case 3: return 720 * 480;
+	case 4: return 800 * 480;
+	case 5: return 800 * 600;
+	case 6: return 960 * 540;
+	default: return 320 * 240;
+	}
+}
+
+static void wii_mode_dimensions(int mode, int hres, int vres, int *out_h, int *out_v)
+{
+	if(mode == 255 && hres > 0 && vres > 0)
+	{
+		*out_h = hres;
+		*out_v = vres;
+		return;
+	}
+
+	switch(mode)
+	{
+	case 0: *out_h = 320; *out_v = 240; break;
+	case 1: *out_h = 480; *out_v = 272; break;
+	case 2: *out_h = 640; *out_v = 480; break;
+	case 3: *out_h = 720; *out_v = 480; break;
+	case 4: *out_h = 800; *out_v = 480; break;
+	case 5: *out_h = 800; *out_v = 600; break;
+	case 6: *out_h = 960; *out_v = 540; break;
+	default: *out_h = 320; *out_v = 240; break;
+	}
+}
+
+static char wii_read_hdvm_flag(void)
+{
+	FILE *handle;
+	char path[MAX_BUFFER_LEN] = {""};
+	char tmpname[MAX_FILENAME_LEN] = {""};
+	char flag = 0;
+
+	getBasePath(path, "Saves", 0);
+	getPakName(tmpname, 99);
+	strcat(path, tmpname);
+	strcat(path, ".hdvm");
+
+	handle = fopen(path, "rb");
+	if(handle == NULL)
+	{
+		return 0;
+	}
+	if(fread(&flag, 1, 1, handle) != 1)
+	{
+		flag = 0;
+	}
+	fclose(handle);
+	return flag;
+}
+
+static void wii_write_hdvm_flag(char flag)
+{
+	FILE *handle;
+	char path[MAX_BUFFER_LEN] = {""};
+	char tmpname[MAX_FILENAME_LEN] = {""};
+
+	getBasePath(path, "Saves", 0);
+	getPakName(tmpname, 99);
+	strcat(path, tmpname);
+	strcat(path, ".hdvm");
+
+	handle = fopen(path, "wb");
+	if(handle == NULL)
+	{
+		return;
+	}
+	fwrite(&flag, 1, 1, handle);
+	fclose(handle);
+}
+
+static int wii_hd_video_prompt(int hres, int vres)
+{
+	int done = 0;
+	int downgrade = 1;
+
+	if(CONF_GetAspectRatio() == CONF_ASPECT_16_9)
+	{
+		isWide = 1;
+	}
+	else
+	{
+		isWide = 0;
+	}
+
+	setVideoMode();
+	initMenu(1);
+
+	while(!done)
+	{
+		copyScreens(Source);
+		printText((isWide ? 40 : 12), (isWide ? 60 : 50), YELLOW, 0, 0, MENU_STR_HD_TITLE);
+		printText((isWide ? 40 : 12), (isWide ? 80 : 70), WHITE, 0, 0, MENU_STR_HD_INFO, hres, vres);
+		printText((isWide ? 40 : 12), (isWide ? 110 : 100), GREEN, 0, 0, MENU_STR_HD_YES);
+		printText((isWide ? 40 : 12), (isWide ? 130 : 120), WHITE, 0, 0, MENU_STR_HD_NO);
+		drawScreens(NULL, 0, 0);
+
+		refreshInput();
+		if(buttonsPressed & (WIIMOTE_A | WIIMOTE_1 | WIIMOTE_PLUS | CC_A | CC_PLUS | GC_A | GC_START))
+		{
+			downgrade = 1;
+			done = 1;
+		}
+		else if(buttonsPressed & (WIIMOTE_B | NUNCHUK_Z | CC_B | GC_B))
+		{
+			downgrade = 0;
+			done = 1;
+		}
+	}
+
+	termMenu();
+	return downgrade;
+}
+
+void wii_apply_hd_videomode_policy(int *mode, int *hres, int *vres)
+{
+	char flag;
+	int pixels;
+	int display_h = 0;
+	int display_v = 0;
+	int downgrade;
+
+	if(mode == NULL)
+	{
+		return;
+	}
+
+	pixels = wii_mode_pixels(*mode, hres ? *hres : 0, vres ? *vres : 0);
+	if(pixels <= WII_SAFE_VIDEO_PIXELS)
+	{
+		return;
+	}
+
+	flag = wii_read_hdvm_flag();
+	if(flag == 'd')
+	{
+		*mode = 0;
+		if(hres)
+		{
+			*hres = 320;
+		}
+		if(vres)
+		{
+			*vres = 240;
+		}
+		return;
+	}
+	if(flag == 'h')
+	{
+		return;
+	}
+
+	wii_mode_dimensions(*mode, hres ? *hres : 0, vres ? *vres : 0, &display_h, &display_v);
+	downgrade = wii_hd_video_prompt(display_h, display_v);
+	wii_write_hdvm_flag(downgrade ? 'd' : 'h');
+
+	if(downgrade)
+	{
+		*mode = 0;
+		if(hres)
+		{
+			*hres = 320;
+		}
+		if(vres)
+		{
+			*vres = 240;
+		}
+	}
+}
+#endif
 
 void Menu()
 {

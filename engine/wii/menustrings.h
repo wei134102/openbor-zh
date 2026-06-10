@@ -12,6 +12,12 @@
 /* Game list header: current index / total count */
 #define MENU_STR_GAME_COUNT     "\xB9\xB2 %d/%d \xB8\xF6\xD3\xCE\xCF\xB7"
 
+/* High-resolution mod memory warning (first launch per pak) */
+#define MENU_STR_HD_TITLE       "\xB8\xDF\xB7\xD6\xB1\xE6\xC2\xCA\xC4\xA3\xD7\xE9"
+#define MENU_STR_HD_INFO        "\xC4\xA3\xD7\xE9 %dx%d \xD5\xBC\xD3\xC3\xC4\xDA\xB4\xE6\xBD\xCF\xB4\xF3"
+#define MENU_STR_HD_YES         "A: \xBD\xB5\xD6\xC1 320x240 (\xBD\xA8\xD2\xE9)"
+#define MENU_STR_HD_NO          "B: \xB1\xA3\xB3\xD6\xB5\xB1\xC7\xB0\xB7\xD6\xB1\xE6\xC2\xCA"
+
 /* Footer hints: "%s: ..." — key name inserted by printText */
 #define MENU_STR_START_GAME     "%s: \xBF\xAA\xCA\xBC\xD3\xCE\xCF\xB7"
 #define MENU_STR_BGM_PLAYER     "%s: \xD2\xF4\xC0\xD6\xB2\xA5\xB7\xC5"

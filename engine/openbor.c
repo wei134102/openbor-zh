@@ -20,6 +20,10 @@
 #include "source/bitmask.h" // Inline bitmask utility functions.
 #include <inttypes.h>
 
+#if WII
+#include "menu.h"
+#endif
+
 #define NaN 0xAAAAAAAA
 
 const char *E_OUT_OF_MEMORY = "Error: Could not allocate sufficient memory.\n";
@@ -48929,6 +48933,10 @@ readfile:
         free(buf);
         buf = NULL;
     }
+
+#if WII
+    wii_apply_hd_videomode_policy(&videoMode, &videomodes.hRes, &videomodes.vRes);
+#endif
 
 VIDEOMODES:
     videomodes.mode    = videoMode;

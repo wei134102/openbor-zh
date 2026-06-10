@@ -7,9 +7,30 @@
  */
 
 #include <png.h>
+#include <limits.h>
 #include "types.h"
 #include "screen.h"
 #include <assert.h>
+
+#define MAX_PNG_IMAGE_BYTES (32 * 1024 * 1024)
+
+static int png_dimensions_valid(unsigned int width, unsigned int height)
+{
+    size_t bytes;
+
+    if(width == 0 || height == 0)
+    {
+        return 0;
+    }
+
+    if(width > (unsigned int)INT_MAX / height)
+    {
+        return 0;
+    }
+
+    bytes = (size_t)width * (size_t)height * 4;
+    return bytes <= MAX_PNG_IMAGE_BYTES;
+}
 
 #ifdef SDL
 #include "SDL.h"
@@ -63,6 +84,11 @@ s_screen *pngToScreen(const void *data)
     png_set_sig_bytes(png_ptr, sig_read);
     png_read_info(png_ptr, info_ptr);
     png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
+
+    if(!png_dimensions_valid(width, height))
+    {
+        goto error2;
+    }
 
     png_set_strip_16(png_ptr);
     png_set_packing(png_ptr);

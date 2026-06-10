@@ -157,8 +157,10 @@ static int openpng(const char *filename, const char *packfilename)
         goto openpng_abort;
     }
 
-    if(image_res.width <= 0 || image_res.height <= 0)
+    if(!image_bytes_valid(image_res.width, image_res.height, 4))
     {
+        printf("\n\n Error: The PNG '%s' has invalid dimensions (%d x %d).\n",
+               filename, image_res.width, image_res.height);
         goto openpng_abort;
     }
 
@@ -256,6 +258,30 @@ static int readpng(unsigned char *buf, unsigned char *pal, int maxwidth, int max
 // height are correct on both little- and big-endian hosts (Wii / PowerPC).
 
 #define GIF_MAX_DIMENSION 4096
+#define MAX_IMAGE_BYTES (32 * 1024 * 1024)
+
+static int image_bytes_valid(int width, int height, int bpp)
+{
+    size_t bytes;
+
+    if(width <= 0 || height <= 0 || bpp <= 0)
+    {
+        return 0;
+    }
+
+    if(width > INT_MAX / height)
+    {
+        return 0;
+    }
+
+    if((width * height) > INT_MAX / bpp)
+    {
+        return 0;
+    }
+
+    bytes = (size_t)width * (size_t)height * (size_t)bpp;
+    return bytes <= MAX_IMAGE_BYTES;
+}
 
 static unsigned short read_le16(const unsigned char *p)
 {

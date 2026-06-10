@@ -13,16 +13,66 @@
 */
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 #include "types.h"
 #include "transform.h"
 #include "screen.h"
 
+/* Reject corrupt or pathological image dimensions before signed multiply overflow. */
+#define MAX_SCREEN_BYTES (32 * 1024 * 1024)
+
+static int screen_allocation_size(int width, int height, int pixelformat, size_t *psize_out)
+{
+    int bpp;
+
+    width &= (0xFFFFFFFF - 3);
+
+    if(width <= 0 || height <= 0)
+    {
+        return 0;
+    }
+
+    if(pixelformat < 0 || pixelformat >= (int)(sizeof(pixelbytes) / sizeof(pixelbytes[0])))
+    {
+        return 0;
+    }
+
+    bpp = pixelbytes[pixelformat];
+    if(bpp <= 0)
+    {
+        return 0;
+    }
+
+    if(width > INT_MAX / height)
+    {
+        return 0;
+    }
+
+    if((width * height) > INT_MAX / bpp)
+    {
+        return 0;
+    }
+
+    *psize_out = (size_t)width * (size_t)height * (size_t)bpp;
+    if(*psize_out > MAX_SCREEN_BYTES)
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
 s_screen *allocscreen(int width, int height, int pixelformat)
 {
     s_screen *screen;
-    int psize;
+    size_t psize;
+
+    if(!screen_allocation_size(width, height, pixelformat, &psize))
+    {
+        return NULL;
+    }
+
     width &= (0xFFFFFFFF - 3);
-    psize = width * height * pixelbytes[pixelformat];
     if(pixelformat == PIXEL_x8)
     {
         screen = (s_screen *)malloc(sizeof(s_screen) + psize + PAL_BYTES + ANYNUMBER);

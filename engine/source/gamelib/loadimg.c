@@ -597,6 +597,10 @@ readpng_abort:
 }
 
 // ============================== GIF loading ===============================
+// GIF headers are byte-packed; without pack(1) the compiler inserts padding
+// after magic[6] and corrupts width/height (OOM on Wii).
+
+#pragma pack(push, 1)
 
 typedef struct
 {
@@ -612,6 +616,30 @@ typedef struct
     unsigned short  left, top, width, height;
     unsigned char   flags;
 } gifblockstruct;
+
+#pragma pack(pop)
+
+#define GIF_MAX_DIMENSION 4096
+
+static int gif_dimensions_valid(int width, int height)
+{
+    if(width <= 0 || height <= 0)
+    {
+        return 0;
+    }
+
+    if(width > GIF_MAX_DIMENSION || height > GIF_MAX_DIMENSION)
+    {
+        return 0;
+    }
+
+    if(width > INT_MAX / height)
+    {
+        return 0;
+    }
+
+    return 1;
+}
 
 static gifheaderstruct gif_header;
 
@@ -845,6 +873,17 @@ static int opengif(const char *filename, const char *packfilename)
     image_res.width = gif_header.screenwidth;
     image_res.height = gif_header.screenheight;
 
+    if(!gif_dimensions_valid(image_res.width, image_res.height))
+    {
+        printf("\n\n Error: The GIF '%s' has invalid dimensions (%d x %d).\n",
+               filename, image_res.width, image_res.height);
+        closepackfile(image_load_handle);
+        image_load_handle = HANDLE_UNUSED;
+        image_res.width = 0;
+        image_res.height = 0;
+        return 0;
+    }
+
     return 1;
 }
 
@@ -931,6 +970,11 @@ static int readgif(unsigned char *buf, unsigned char *pal, int maxwidth, int max
             iblock.top = SwapLSB16(iblock.top);
             iblock.width = SwapLSB16(iblock.width);
             iblock.height = SwapLSB16(iblock.height);
+
+            if(!gif_dimensions_valid(iblock.width, iblock.height))
+            {
+                return 0;
+            }
 
             if((iblock.flags & 0x80) && pal)
             {

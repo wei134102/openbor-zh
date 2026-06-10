@@ -9,6 +9,9 @@
 /* Paks folder has no modules */
 #define MENU_STR_NO_MODS        "Paks\xCE\xC4\xBC\xFE\xBC\xD0\xD6\xD0\xCE\xDE\xC4\xA3\xD7\xE9!"
 
+/* Game list header: current index / total count */
+#define MENU_STR_GAME_COUNT     "\xB9\xB2 %d/%d \xB8\xF6\xD3\xCE\xCF\xB7"
+
 /* Footer hints: "%s: ..." — key name inserted by printText */
 #define MENU_STR_START_GAME     "%s: \xBF\xAA\xCA\xBC\xD3\xCE\xCF\xB7"
 #define MENU_STR_BGM_PLAYER     "%s: \xD2\xF4\xC0\xD6\xB2\xA5\xB7\xC5"

@@ -29,6 +29,8 @@
 #define		MAX_LABEL_LEN		128
 
 #define		MAX_MODS_NUM		18 //Kratus (13-03-21) decreased the max pak numbers from 100 to 18 to avoid engine "close" bug
+#define		MAX_PAGE_MODS_LENGTH		18
+#define		MAX_PAGE_MODS_FAST_FORWARD	10
 
 #ifdef SDL
 #include "sdlport.h"

@@ -53,6 +53,10 @@ extern int videoMode;
 #define LOG_SCREEN_TOP 2
 #define LOG_SCREEN_END (isWide ? 26 : 23)
 
+#define FIRST_KEYPRESS      1
+#define IMPULSE_TIME        0.12f
+#define FIRST_IMPULSE_TIME  1.2f
+
 #define DIR_UP			0x00000001
 #define DIR_RIGHT		0x00000002
 #define DIR_DOWN		0x00000004
@@ -460,10 +464,10 @@ void printText(int x, int y, int col, int backcol, int fill, char *format, ...)
 			if(gbglyph)
 			{
 				drawMenuGlyph12(x, y, col, backcol, fill, gbglyph);
-				x += MENUFONT_WIDTH;
-				i += 2;
-				continue;
 			}
+			x += MENUFONT_WIDTH;
+			i += 2;
+			continue;
 		}
 
 		// ASCII / half-width mapping
@@ -539,13 +543,118 @@ s_screen *getPreview(char *filename)
 	return scale; // return scaled down screen
 }
 
+static void copy_pak_display_name(char *dest, size_t destsize, const char *filename)
+{
+	size_t di = 0;
+	size_t si = 0;
+	int pixels = 0;
+	int max_pixels = isWide ? 240 : 136;
+	size_t end = strlen(filename);
+
+	if(end > 4)
+	{
+		end -= 4;
+	}
+
+	while(si < end && di + 2 < destsize)
+	{
+		unsigned char c = (unsigned char)filename[si];
+		int char_width = 5;
+
+		if(c >= 0x81 && si + 1 < end)
+		{
+			char_width = MENUFONT_WIDTH;
+			if(pixels + char_width > max_pixels)
+			{
+				break;
+			}
+			dest[di++] = filename[si++];
+			dest[di++] = filename[si++];
+		}
+		else
+		{
+			if(pixels + char_width > max_pixels)
+			{
+				break;
+			}
+			dest[di++] = filename[si++];
+		}
+		pixels += char_width;
+	}
+
+	dest[di] = '\0';
+}
+
+static int hold_key_impulse(int key, float time_range, int start_press_flag, float start_time_eta)
+{
+	static int hold_time[64];
+	static int first_keypress[64];
+	static int second_keypress[64];
+	int key_index = 0;
+	int tmp_key = key;
+
+	while(tmp_key >>= 1)
+	{
+		key_index++;
+	}
+
+	if(buttonsHeld & key)
+	{
+		unsigned time = timer_gettick();
+
+		time_range *= GAME_SPEED;
+		start_time_eta *= GAME_SPEED;
+		if(!hold_time[key_index])
+		{
+			hold_time[key_index] = time;
+
+			if(start_press_flag > 0 && !first_keypress[key_index])
+			{
+				first_keypress[key_index] = 1;
+				return key;
+			}
+		}
+		else if(time - hold_time[key_index] >= time_range)
+		{
+			if(start_time_eta > 0 && !second_keypress[key_index])
+			{
+				if(time - hold_time[key_index] < start_time_eta)
+				{
+					return 0;
+				}
+			}
+
+			if(!second_keypress[key_index])
+			{
+				second_keypress[key_index] = 1;
+			}
+			hold_time[key_index] = 0;
+			return key;
+		}
+	}
+	else
+	{
+		hold_time[key_index] = 0;
+		first_keypress[key_index] = 0;
+		second_keypress[key_index] = 0;
+	}
+
+	return 0;
+}
+
 int ControlMenu()
 {
 	int status = -1;
-	int dListMaxDisplay = 17;
+	int dListMaxDisplay = MAX_PAGE_MODS_LENGTH - 1;
 	//bothnewkeys = 0;
 	//inputrefresh(0);
 	refreshInput();
+
+	buttonsPressed |= hold_key_impulse(DIR_DOWN, IMPULSE_TIME, FIRST_KEYPRESS, FIRST_IMPULSE_TIME);
+	buttonsPressed |= hold_key_impulse(DIR_LEFT, IMPULSE_TIME, FIRST_KEYPRESS, FIRST_IMPULSE_TIME);
+	buttonsPressed |= hold_key_impulse(DIR_UP, IMPULSE_TIME, FIRST_KEYPRESS, FIRST_IMPULSE_TIME);
+	buttonsPressed |= hold_key_impulse(DIR_RIGHT, IMPULSE_TIME, FIRST_KEYPRESS, FIRST_IMPULSE_TIME);
+
 	switch(buttonsPressed)
 	{
 		case DIR_UP:
@@ -569,9 +678,27 @@ int ControlMenu()
 			break;
 
 		case DIR_LEFT:
+			dListScrollPosition -= MAX_PAGE_MODS_FAST_FORWARD;
+			if(dListScrollPosition < 0)
+			{
+				dListScrollPosition = 0;
+				dListCurrentPosition -= MAX_PAGE_MODS_FAST_FORWARD;
+			}
+			if(dListCurrentPosition < 0) dListCurrentPosition = 0;
 			break;
 
 		case DIR_RIGHT:
+			dListCurrentPosition += MAX_PAGE_MODS_FAST_FORWARD;
+			if(dListCurrentPosition > dListTotal - 1) dListCurrentPosition = dListTotal - 1;
+			if(dListCurrentPosition > dListMaxDisplay)
+	        {
+		        dListScrollPosition += MAX_PAGE_MODS_FAST_FORWARD;
+		        if((dListCurrentPosition + dListScrollPosition) > dListTotal - 1)
+		        {
+		        	dListScrollPosition = dListTotal - MAX_PAGE_MODS_LENGTH;
+		        }
+			    dListCurrentPosition = dListMaxDisplay;
+			}
 			break;
 
 		case WIIMOTE_PLUS:
@@ -634,6 +761,49 @@ void termMenu()
 	control_exit();
 }
 
+static void draw_vscrollbar(void)
+{
+	Rect track;
+	Rect thumb;
+	int offset_x = (isWide ? 30 : 7) - 3;
+	int offset_y = (isWide ? 33 : 22) + 4;
+	int box_width = 144;
+	int box_height = 194;
+	int min_vscrollbar_height = 2;
+	int vbar_height = box_height;
+	int vbar_width = 4;
+	float vbar_ratio;
+	int vspace = 0;
+	int vbar_y = 0;
+
+	if(dListTotal <= MAX_PAGE_MODS_LENGTH)
+	{
+		return;
+	}
+
+	vbar_ratio = ((MAX_PAGE_MODS_LENGTH * 100.0f) / dListTotal) / 100.0f;
+	vbar_height = (int)(box_height * vbar_ratio);
+	if(vbar_height < min_vscrollbar_height)
+	{
+		vbar_height = min_vscrollbar_height;
+	}
+
+	vspace = box_height - vbar_height;
+	vbar_y = (int)(((dListScrollPosition) * vspace) / (dListTotal - MAX_PAGE_MODS_LENGTH));
+
+	track.x = offset_x + box_width - vbar_width;
+	track.y = offset_y;
+	track.width = vbar_width;
+	track.height = box_height;
+	thumb.x = offset_x + box_width - vbar_width;
+	thumb.y = offset_y + vbar_y;
+	thumb.width = vbar_width;
+	thumb.height = vbar_height;
+
+	fillRect(Scaler, &track, LIGHT_GRAY);
+	fillRect(Scaler, &thumb, GRAY);
+}
+
 void drawMenu()
 {
 	s_screen *Image = NULL;
@@ -644,18 +814,22 @@ void drawMenu()
 	int clipX=0, clipY=0;
 
 	copyScreens(Source);
-	if(dListTotal < 1) printText((isWide ? 30 : 8), (isWide ? 33 : 24), RED, 0, 0, MENU_STR_NO_MODS);
+	if(dListTotal < 1)
+	{
+		printText((isWide ? 30 : 8), (isWide ? 33 : 24), RED, 0, 0, MENU_STR_NO_MODS);
+	}
+	else
+	{
+		printText((isWide ? 30 : 7), (isWide ? 22 : 14), YELLOW, 0, 0, MENU_STR_GAME_COUNT,
+			dListCurrentPosition + dListScrollPosition + 1, dListTotal);
+	}
 	for(list=0; list<dListTotal; list++)
 	{
-		if(list < MAX_MODS_NUM)
+		if(list < MAX_PAGE_MODS_LENGTH)
 		{
 			shift = 0;
 			colors = GRAY;
-			strncpy(listing, "", (isWide ? 44 : 28));
-			if(strlen(filelist[list+dListScrollPosition].filename)-4 < (isWide ? 44 : 28))
-				safe_strncpy(listing, filelist[list+dListScrollPosition].filename, strlen(filelist[list+dListScrollPosition].filename)-4);
-			if(strlen(filelist[list+dListScrollPosition].filename)-4 > (isWide ? 44 : 28))
-				safe_strncpy(listing, filelist[list+dListScrollPosition].filename, (isWide ? 44 : 28));
+			copy_pak_display_name(listing, sizeof(listing), filelist[list+dListScrollPosition].filename);
 			if(list == dListCurrentPosition)
 			{
 				shift = 2;
@@ -671,6 +845,7 @@ void drawMenu()
 			printText((isWide ? 30 : 7) + shift, (isWide ? 33 : 22)+(11*list) , colors, 0, 0, "%s", listing);
 		}
 	}
+	draw_vscrollbar();
 
 	printText((isWide ? 26 : 5), (isWide ? 11 : 4), WHITE, 0, 0, "OpenBoR %s", VERSION);
 	printText((isWide ? 392 : 261),(isWide ? 11 : 4), WHITE, 0, 0, __DATE__);

@@ -282,8 +282,6 @@ static int readpng(unsigned char *buf, unsigned char *pal, int maxwidth, int max
 // GIF on-disk fields are little-endian. Parse them from raw bytes so width and
 // height are correct on both little- and big-endian hosts (Wii / PowerPC).
 
-#define GIF_MAX_DIMENSION 4096
-
 static unsigned short read_le16(const unsigned char *p)
 {
     return (unsigned short)(p[0] | (p[1] << 8));
@@ -306,22 +304,8 @@ typedef struct
 
 static int gif_dimensions_valid(int width, int height)
 {
-    if(width <= 0 || height <= 0)
-    {
-        return 0;
-    }
-
-    if(width > GIF_MAX_DIMENSION || height > GIF_MAX_DIMENSION)
-    {
-        return 0;
-    }
-
-    if(width > INT_MAX / height)
-    {
-        return 0;
-    }
-
-    return 1;
+    /* Scrolling level backgrounds can be very wide (e.g. 10204x545). */
+    return image_bytes_valid(width, height, 1);
 }
 
 static gifheaderstruct gif_header;

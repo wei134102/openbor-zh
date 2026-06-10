@@ -13,6 +13,7 @@ void Menu();
 
 #if WII
 void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres);
+extern int wii_hd_video_downgraded;
 #endif
 
 #endif

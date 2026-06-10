@@ -49064,7 +49064,16 @@ VIDEOMODES:
         borShutdown(1, "Not enough memory!\n");
     }
     videomodes.pixel = pixelbytes[(int)vscreen->pixelformat];
-    //video_set_mode(videomodes);
+    if(!video_set_mode(videomodes))
+    {
+        borShutdown(1, "Unable to set video mode: %d x %d!\n", videomodes.hRes, videomodes.vRes);
+    }
+#if WII
+    if(wii_hd_video_downgraded)
+    {
+        video_stretch(1);
+    }
+#endif
     clearscreen(vscreen);
 
     if(log)

@@ -956,6 +956,8 @@ void setVideoMode()
 /* Mode 0 (320x240) and mode 1 (480x272) are normal on Wii; HD mods use mode 2+ */
 #define WII_SAFE_VIDEO_PIXELS (480 * 272)
 
+int wii_hd_video_downgraded = 0;
+
 static int wii_mode_pixels(int mode, int hres, int vres)
 {
 	if(mode == 255)
@@ -1103,6 +1105,8 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 		return;
 	}
 
+	wii_hd_video_downgraded = 0;
+
 	pixels = wii_mode_pixels(*mode, hres ? *hres : 0, vres ? *vres : 0);
 	if(pixels <= WII_SAFE_VIDEO_PIXELS)
 	{
@@ -1112,6 +1116,7 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 	flag = wii_read_hdvm_flag();
 	if(flag == 'd')
 	{
+		wii_hd_video_downgraded = 1;
 		*mode = 0;
 		if(hres)
 		{
@@ -1134,6 +1139,7 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 
 	if(downgrade)
 	{
+		wii_hd_video_downgraded = 1;
 		*mode = 0;
 		if(hres)
 		{

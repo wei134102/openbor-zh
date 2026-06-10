@@ -38,6 +38,8 @@ static unsigned short palette[256] ATTRIBUTE_ALIGN(32);
 static int inited = 0;
 static int stretch = 0;
 
+extern s_videomodes videomodes;
+
 static int brightness = 0;
 static int brightness_update = 0;
 static int _gamma = 0;
@@ -251,6 +253,22 @@ void video_draw_quad(int x, int y, int width, int height)
  */
 int video_copy_screen(s_screen* src)
 {
+	if(src == NULL)
+	{
+		return 0;
+	}
+
+	/* Keep GX texture size in sync with the game framebuffer (e.g. HD->320x240 downgrade). */
+	if(src->width != textureWidth || src->height != textureHeight)
+	{
+		videomodes.hRes = (short)src->width;
+		videomodes.vRes = (short)src->height;
+		if(!video_set_mode(videomodes))
+		{
+			return 0;
+		}
+	}
+
 	whichtexture ^= 1;
 
 	switch(bytes_per_pixel)
@@ -521,14 +539,26 @@ void copyscreen32(s_screen* src)
 	int x, y;
 	u32* data = (u32*)src->data;
 	u16* dest = (u16*)texturemem[whichtexture];
-	s32 offset1 = textureWidth;
-	s32 offset2 = textureWidth * 2;
-	s32 offset3 = textureWidth * 3;
+	int copy_w = src->width;
+	int copy_h = src->height;
+	s32 src_stride = src->width;
+	s32 offset1 = src_stride;
+	s32 offset2 = src_stride * 2;
+	s32 offset3 = src_stride * 3;
+
+	if(copy_w > textureWidth)
+	{
+		copy_w = textureWidth;
+	}
+	if(copy_h > textureHeight)
+	{
+		copy_h = textureHeight;
+	}
 
 	// RGBA8 textures in GX are stored in 4x4 tiles in two cache lines, AR and GB
-	for(y=0; y<textureHeight; y+=4)
+	for(y=0; y<copy_h; y+=4)
 	{
-		for(x=0; x<textureWidth; x+=4)
+		for(x=0; x<copy_w; x+=4)
 		{
 			memcpy32(dest, data);
 			memcpy32(dest+4, data+offset1);
@@ -537,7 +567,7 @@ void copyscreen32(s_screen* src)
 			data += 4;
 			dest += 32;
 		}
-		data += textureWidth * 3; // we're already at the end of the first line
+		data += offset1 * 3;
 	}
 }
 

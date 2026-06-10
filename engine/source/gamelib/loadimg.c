@@ -1093,6 +1093,26 @@ static int copy_base_without_ext(char *dest, size_t destsize, const char *filena
 }
 
 /*
+* Append an image extension to base without snprintf truncation warnings.
+* Returns 1 on success, or 0 if the combined path would not fit in dest.
+*/
+static int append_image_ext(char *dest, size_t destsize, const char *base, const char *extension)
+{
+    size_t baselen = strlen(base);
+    size_t extlen = strlen(extension);
+
+    if(baselen == 0 || baselen + extlen >= destsize)
+    {
+        return 0;
+    }
+
+    memcpy(dest, base, baselen);
+    memcpy(dest + baselen, extension, extlen);
+    dest[baselen + extlen] = '\0';
+    return 1;
+}
+
+/*
 * Caskey, Damon V.
 * Original date and author unknown, reworked 2026-06-01.
 *
@@ -1146,9 +1166,9 @@ static int openimage(char *filename, char *packfile) {
                 return 1;
             }
 
-            if(copy_base_without_ext(fnam, sizeof(fnam), filename, ".png"))
+            if(copy_base_without_ext(fnam, sizeof(fnam), filename, ".png")
+                && append_image_ext(alt, sizeof(alt), fnam, ".gif"))
             {
-                snprintf(alt, sizeof(alt), "%s.gif", fnam);
                 if(opengif(alt, packfile)) {
                     open_type = OT_GIF;
                     return 1;
@@ -1165,9 +1185,9 @@ static int openimage(char *filename, char *packfile) {
                 return 1;
             }
 
-            if(copy_base_without_ext(fnam, sizeof(fnam), filename, ".gif"))
+            if(copy_base_without_ext(fnam, sizeof(fnam), filename, ".gif")
+                && append_image_ext(alt, sizeof(alt), fnam, ".png"))
             {
-                snprintf(alt, sizeof(alt), "%s.png", fnam);
                 if(openpng(alt, packfile)) {
                     open_type = OT_PNG;
                     return 1;
@@ -1185,14 +1205,14 @@ static int openimage(char *filename, char *packfile) {
     * No extension was supplied. Prefer GIF for legacy modules, then PNG.
     */
 
-    snprintf(fnam, sizeof(fnam), "%s.gif", filename);
-    if(opengif(fnam, packfile)) {
+    if(append_image_ext(fnam, sizeof(fnam), filename, ".gif")
+        && opengif(fnam, packfile)) {
         open_type = OT_GIF;
         return 1;
     }
 
-    snprintf(fnam, sizeof(fnam), "%s.png", filename);
-    if(openpng(fnam, packfile)) {
+    if(append_image_ext(fnam, sizeof(fnam), filename, ".png")
+        && openpng(fnam, packfile)) {
         open_type = OT_PNG;
         return 1;
     }

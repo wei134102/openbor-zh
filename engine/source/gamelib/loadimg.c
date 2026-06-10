@@ -54,6 +54,31 @@ typedef struct image_resolution {
 
 static image_resolution image_res = {.width = 0, .height = 0};
 
+#define MAX_IMAGE_BYTES (32 * 1024 * 1024)
+
+static int image_bytes_valid(int width, int height, int bpp)
+{
+    size_t bytes;
+
+    if(width <= 0 || height <= 0 || bpp <= 0)
+    {
+        return 0;
+    }
+
+    if(width > INT_MAX / height)
+    {
+        return 0;
+    }
+
+    if((width * height) > INT_MAX / bpp)
+    {
+        return 0;
+    }
+
+    bytes = (size_t)width * (size_t)height * (size_t)bpp;
+    return bytes <= MAX_IMAGE_BYTES;
+}
+
 // ============================== PNG loading ===============================
 // libpng loader restored from OpenBOR 3.0 for legacy mod compatibility on Wii.
 
@@ -258,30 +283,6 @@ static int readpng(unsigned char *buf, unsigned char *pal, int maxwidth, int max
 // height are correct on both little- and big-endian hosts (Wii / PowerPC).
 
 #define GIF_MAX_DIMENSION 4096
-#define MAX_IMAGE_BYTES (32 * 1024 * 1024)
-
-static int image_bytes_valid(int width, int height, int bpp)
-{
-    size_t bytes;
-
-    if(width <= 0 || height <= 0 || bpp <= 0)
-    {
-        return 0;
-    }
-
-    if(width > INT_MAX / height)
-    {
-        return 0;
-    }
-
-    if((width * height) > INT_MAX / bpp)
-    {
-        return 0;
-    }
-
-    bytes = (size_t)width * (size_t)height * (size_t)bpp;
-    return bytes <= MAX_IMAGE_BYTES;
-}
 
 static unsigned short read_le16(const unsigned char *p)
 {

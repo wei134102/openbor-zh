@@ -3846,8 +3846,9 @@ void load_background(char *filename)
     unload_background();
 
     // Attempt to load 8bit color depth background. If it fails,
-    // then attempt to load 32bit color depth background. Legacy GIF
-    // backgrounds are skipped with a blank screen (OpenBOR 4.0 is PNG-only).
+    // then attempt to load 32bit color depth background. If THAT
+    // fails, something is wrong and we better shut down to avoid
+    // a crash.
     if(!loadscreen(filename, packfile, NULL, PIXEL_x8, &background))
     {
         if (loadscreen32(filename, packfile, &background))
@@ -3856,13 +3857,7 @@ void load_background(char *filename)
         }
         else
         {
-            printf("Warning: unable to load background '%s' (PNG required), using blank screen\n", filename);
-            background = allocscreen(videomodes.hRes, videomodes.vRes, pixelformat);
-            if(!background)
-            {
-                borShutdown(1, "Error loading background (PIXEL_x8/PIXEL_32) file '%s'", filename);
-            }
-            clearscreen(background);
+            borShutdown(1, "Error loading background (PIXEL_x8/PIXEL_32) file '%s'", filename);
         }
     }
 
@@ -4540,35 +4535,43 @@ void load_special_sprites()
 {
     memset(shadowsprites, -1, sizeof(*shadowsprites) * 6);
     golsprite = gosprite = -1;
-    if (testpackfile("data/sprites/shadow1.png", packfile) >= 0)
+    if (testpackfile("data/sprites/shadow1.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/shadow1.png", packfile) >= 0)
     {
         shadowsprites[0] = loadsprite("data/sprites/shadow1", 9, 3, pixelformat);
     }
-    if (testpackfile("data/sprites/shadow2.png", packfile) >= 0)
+    if (testpackfile("data/sprites/shadow2.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/shadow2.png", packfile) >= 0)
     {
         shadowsprites[1] = loadsprite("data/sprites/shadow2", 14, 5, pixelformat);
     }
-    if (testpackfile("data/sprites/shadow3.png", packfile) >= 0)
+    if (testpackfile("data/sprites/shadow3.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/shadow3.png", packfile) >= 0)
     {
         shadowsprites[2] = loadsprite("data/sprites/shadow3", 19, 6, pixelformat);
     }
-    if (testpackfile("data/sprites/shadow4.png", packfile) >= 0)
+    if (testpackfile("data/sprites/shadow4.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/shadow4.png", packfile) >= 0)
     {
         shadowsprites[3] = loadsprite("data/sprites/shadow4", 24, 8, pixelformat);
     }
-    if (testpackfile("data/sprites/shadow5.png", packfile) >= 0)
+    if (testpackfile("data/sprites/shadow5.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/shadow5.png", packfile) >= 0)
     {
         shadowsprites[4] = loadsprite("data/sprites/shadow5", 29, 9, pixelformat);
     }
-    if (testpackfile("data/sprites/shadow6.png", packfile) >= 0)
+    if (testpackfile("data/sprites/shadow6.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/shadow6.png", packfile) >= 0)
     {
         shadowsprites[5] = loadsprite("data/sprites/shadow6", 34, 11, pixelformat);
     }
-    if (testpackfile("data/sprites/arrow.png", packfile) >= 0)
+    if (testpackfile("data/sprites/arrow.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/arrow.png", packfile) >= 0)
     {
         gosprite  = loadsprite("data/sprites/arrow", 35, 23, pixelformat);
     }
-    if (testpackfile("data/sprites/arrowl.png", packfile) >= 0)
+    if (testpackfile("data/sprites/arrowl.gif", packfile) >= 0 ||
+        testpackfile("data/sprites/arrowl.png", packfile) >= 0)
     {
         golsprite = loadsprite("data/sprites/arrowl", 35, 23, pixelformat);
     }

@@ -7,11 +7,11 @@
  */
 
 /*
-* Functions to load PNG images into 
-* screens or bitmaps. Legacy BMP, PCX, 
-* and still GIF support removed 2026-06-01.
+* Functions to load PNG and legacy GIF images into
+* screens or bitmaps. PNG is preferred for OpenBOR 4.0
+* modules; GIF is retained on openbor-zh-wii for older packs.
 *
-* Last update: 2026-06-01 by Damon V. Caskey.
+* Last update: openbor-zh-wii branch.
 * Now loading to screens or bitmaps,
 * creating them on-the-fly if necessary.
 */
@@ -596,11 +596,381 @@ readpng_abort:
     return 0;
 }
 
+// ============================== GIF loading ===============================
+
+typedef struct
+{
+    char            magic[6];
+    unsigned short  screenwidth, screenheight;
+    unsigned char   flags;
+    unsigned char   background;
+    unsigned char   aspect;
+} gifheaderstruct;
+
+typedef struct
+{
+    unsigned short  left, top, width, height;
+    unsigned char   flags;
+} gifblockstruct;
+
+static gifheaderstruct gif_header;
+
+static unsigned char readbyte(int handle)
+{
+    unsigned char c = 0;
+    readpackfile(handle, &c, 1);
+    return c;
+}
+
+#define NO_CODE -1
+
+static int decodegifblock(int handle, unsigned char *buf, int width, int height, unsigned char bits, gifblockstruct *gb)
+{
+    short bits2;
+    short codesize;
+    short codesize2;
+    short nextcode;
+    short thiscode;
+    short oldtoken;
+    short currentcode;
+    short oldcode;
+    short bitsleft;
+    short blocksize;
+    int line = 0;
+    int byte = gb->left;
+    int pass = 0;
+
+    unsigned char *p;
+    unsigned char *u;
+
+    unsigned char *q;
+    unsigned char b[255];
+    unsigned char *linebuffer;
+
+    static unsigned char firstcodestack[4096];
+    static unsigned char lastcodestack[4096];
+    static short codestack[4096];
+
+    static short wordmasktable[] = {    0x0000, 0x0001, 0x0003, 0x0007,
+                                        0x000f, 0x001f, 0x003f, 0x007f,
+                                        0x00ff, 0x01ff, 0x03ff, 0x07ff,
+                                        0x0fff, 0x1fff, 0x3fff, 0x7fff
+                                   };
+
+    static short inctable[] = { 8, 8, 4, 2, 0 };
+    static short startable[] = { 0, 4, 2, 1, 0 };
+
+    p = q = b;
+    bitsleft = 8;
+
+    if (bits < 2 || bits > 8)
+    {
+        return 0;
+    }
+    bits2 = 1 << bits;
+    nextcode = bits2 + 2;
+    codesize2 = 1 << (codesize = bits + 1);
+    oldcode = oldtoken = NO_CODE;
+
+    linebuffer = buf + (gb->top * width);
+
+    for(;;)
+    {
+        if(bitsleft == 8)
+        {
+            if(++p >= q && (((blocksize = (unsigned char)readbyte(handle)) < 1) ||
+                            (q = (p = b) + readpackfile(handle, b, blocksize)) < (b + blocksize)))
+            {
+                return 0;
+            }
+            bitsleft = 0;
+        }
+        thiscode = *p;
+        if((currentcode = (codesize + bitsleft)) <= 8)
+        {
+            *p >>= codesize;
+            bitsleft = currentcode;
+        }
+        else
+        {
+            if(++p >= q && (((blocksize = (unsigned char)readbyte(handle)) < 1) ||
+                            (q = (p = b) + readpackfile(handle, b, blocksize)) < (b + blocksize)))
+            {
+                return 0;
+            }
+
+            thiscode |= *p << (8 - bitsleft);
+            if(currentcode <= 16)
+            {
+                *p >>= (bitsleft = currentcode - 8);
+            }
+            else
+            {
+                if(++p >= q && (((blocksize = (unsigned char)readbyte(handle)) < 1) ||
+                                (q = (p = b) + readpackfile(handle, b, blocksize)) < (b + blocksize)))
+                {
+                    return 0;
+                }
+
+                thiscode |= *p << (16 - bitsleft);
+                *p >>= (bitsleft = currentcode - 16);
+            }
+        }
+        thiscode &= wordmasktable[codesize];
+        currentcode = thiscode;
+
+        if(thiscode == (bits2 + 1))
+        {
+            break;
+        }
+        if(thiscode > nextcode)
+        {
+            return 0;
+        }
+
+        if(thiscode == bits2)
+        {
+            nextcode = bits2 + 2;
+            codesize2 = 1 << (codesize = (bits + 1));
+            oldtoken = oldcode = NO_CODE;
+            continue;
+        }
+
+        u = firstcodestack;
+
+        if(thiscode == nextcode)
+        {
+            if(oldcode == NO_CODE)
+            {
+                return 0;
+            }
+            *u++ = oldtoken;
+            thiscode = oldcode;
+        }
+
+        while(thiscode >= bits2)
+        {
+            *u++ = lastcodestack [thiscode];
+            thiscode = codestack[thiscode];
+        }
+
+        oldtoken = thiscode;
+        do
+        {
+            if(byte < width && line < (height - gb->top))
+            {
+                linebuffer[byte] = thiscode;
+            }
+            byte++;
+            if(byte >= gb->left + gb->width)
+            {
+                byte = gb->left;
+                if(gb->flags & 0x40)
+                {
+                    line += inctable[pass];
+                    if(line >= gb->height)
+                    {
+                        line = startable[++pass];
+                    }
+                }
+                else
+                {
+                    ++line;
+                }
+                linebuffer = buf + (width * (gb->top + line));
+            }
+            if (u <= firstcodestack)
+            {
+                break;
+            }
+            thiscode = *--u;
+        }
+        while(1);
+
+        if(nextcode < 4096 && oldcode != NO_CODE)
+        {
+            codestack[nextcode] = oldcode;
+            lastcodestack[nextcode] = oldtoken;
+            if(++nextcode >= codesize2 && codesize < 12)
+            {
+                codesize2 = 1 << ++codesize;
+            }
+        }
+        oldcode = currentcode;
+    }
+    return 1;
+}
+
+static void passgifblock(int handle)
+{
+    int len;
+
+    len = readbyte(handle);
+    while((len = readbyte(handle)) != 0)
+    {
+        seekpackfile(handle, len, SEEK_CUR);
+    }
+}
+
+static int opengif(const char *filename, const char *packfilename)
+{
+    if(image_load_handle >= 0)
+    {
+        closepackfile(image_load_handle);
+    }
+    image_load_handle = HANDLE_UNUSED;
+
+    image_load_handle = openpackfile(filename, packfilename);
+    if(image_load_handle == HANDLE_UNUSED)
+    {
+        return 0;
+    }
+
+    if(readpackfile(image_load_handle, &gif_header, sizeof(gifheaderstruct)) != sizeof(gifheaderstruct))
+    {
+        closepackfile(image_load_handle);
+        image_load_handle = HANDLE_UNUSED;
+        return 0;
+    }
+    if(gif_header.magic[0] != 'G' || gif_header.magic[1] != 'I' || gif_header.magic[2] != 'F')
+    {
+        closepackfile(image_load_handle);
+        image_load_handle = HANDLE_UNUSED;
+        return 0;
+    }
+
+    gif_header.screenwidth = SwapLSB16(gif_header.screenwidth);
+    gif_header.screenheight = SwapLSB16(gif_header.screenheight);
+
+    image_res.width = gif_header.screenwidth;
+    image_res.height = gif_header.screenheight;
+
+    return 1;
+}
+
+static int readgif(unsigned char *buf, unsigned char *pal, int maxwidth, int maxheight)
+{
+    gifblockstruct iblock;
+    int bitdepth;
+    int numcolours;
+    int i, j;
+    int done = 0;
+    unsigned char *pbuf;
+    unsigned char c;
+    int pb = PAL_BYTES;
+
+    bitdepth = (gif_header.flags & 7) + 1;
+    numcolours = (1 << bitdepth);
+
+    if(gif_header.flags & 0x80)
+    {
+        if(pal)
+        {
+            if(pb == 512)
+            {
+                pbuf = malloc(768);
+                if(!pbuf || readpackfile(image_load_handle, pbuf, numcolours * 3) != numcolours * 3)
+                {
+                    free(pbuf);
+                    return 0;
+                }
+                for(i = 0, j = 0; i < 512; i += 2, j += 3)
+                {
+                    *(unsigned short *)(pal + i) = colour16(pbuf[j], pbuf[j + 1], pbuf[j + 2]);
+                }
+                free(pbuf);
+            }
+            else if(pb == 768)
+            {
+                if(readpackfile(image_load_handle, pal, numcolours * 3) != numcolours * 3)
+                {
+                    return 0;
+                }
+            }
+            else if(pb == 1024)
+            {
+                pbuf = malloc(768);
+                if(!pbuf || readpackfile(image_load_handle, pbuf, numcolours * 3) != numcolours * 3)
+                {
+                    free(pbuf);
+                    return 0;
+                }
+                for(i = 0, j = 0; i < 1024; i += 4, j += 3)
+                {
+                    *(unsigned *)(pal + i) = colour32(pbuf[j], pbuf[j + 1], pbuf[j + 2]);
+                }
+                free(pbuf);
+            }
+        }
+        else
+        {
+            seekpackfile(image_load_handle, numcolours * 3, SEEK_CUR);
+        }
+    }
+
+    if(!buf)
+    {
+        return 1;
+    }
+
+    while(!done)
+    {
+        if(readpackfile(image_load_handle, &c, 1) != 1)
+        {
+            break;
+        }
+        switch(c)
+        {
+        case ',':
+            if(readpackfile(image_load_handle, &iblock, sizeof(iblock)) != sizeof(iblock))
+            {
+                return 0;
+            }
+
+            iblock.left = SwapLSB16(iblock.left);
+            iblock.top = SwapLSB16(iblock.top);
+            iblock.width = SwapLSB16(iblock.width);
+            iblock.height = SwapLSB16(iblock.height);
+
+            if((iblock.flags & 0x80) && pal)
+            {
+                i = 3 * (1 << ((iblock.flags & 0x0007) + 1));
+                if(readpackfile(image_load_handle, pal, i) != i)
+                {
+                    return 0;
+                }
+            }
+            else if(iblock.flags & 0x80)
+            {
+                seekpackfile(image_load_handle, 3 * (1 << ((iblock.flags & 0x0007) + 1)), SEEK_CUR);
+            }
+
+            if(readpackfile(image_load_handle, &c, 1) != 1)
+            {
+                return 0;
+            }
+            if(c < 2 || c > 8)
+            {
+                return 0;
+            }
+            if(!decodegifblock(image_load_handle, buf, maxwidth, maxheight, c, &iblock))
+            {
+                return 0;
+            }
+            break;
+        case '!':
+            passgifblock(image_load_handle);
+            break;
+        case 0:
+            break;
+        default:
+            done = 1;
+        }
+    }
+    return 1;
+}
+
 // ============================== auto loading ===============================
-/*
-* Caskey, Damon V.
-* Simplified still image loader to PNG only 2026-06-01.
-*/
 
 /*
 * Image format currently opened by openimage().
@@ -609,6 +979,7 @@ readpng_abort:
 */
 typedef enum open_type_enum {
     OT_NONE = 0,
+    OT_GIF,
     OT_PNG
 } open_type_enum;
     
@@ -646,14 +1017,14 @@ static const char *get_image_extension(const char *filename) {
 * Caskey, Damon V.
 * Original date and author unknown, reworked 2026-06-01.
 *
-* Opens a PNG image from disk or the active pack file and records the
+* Opens a PNG or GIF image from disk or the active pack file and records the
 * detected image type for later readimage() and closeimage() calls.
 *
-* If filename already includes .png, only that exact file is tested.
-* This avoids opening a valid image more than once and leaking pack
+* If filename already includes a supported extension, only that exact file is
+* tested. This avoids opening a valid image more than once and leaking pack
 * file handles.
 *
-* If filename has no supported extension, .png is appended and tested.
+* If filename has no supported extension, .png is tried first, then .gif.
 *
 * Returns 1 on success, or 0 if no supported image could be opened.
 */
@@ -697,12 +1068,22 @@ static int openimage(char *filename, char *packfile) {
             return 0;
         }
 
-        printf("\n\n Error: Unsupported image format '%s' for file '%s'. Use non-interlaced indexed PNG images.\n", ext, filename);
+        if(stricmp(ext, ".gif") == 0) {
+
+            if(opengif(filename, packfile)) {
+                open_type = OT_GIF;
+                return 1;
+            }
+
+            return 0;
+        }
+
+        printf("\n\n Error: Unsupported image format '%s' for file '%s'. Use PNG or GIF images.\n", ext, filename);
         return 0;
     }
 
     /*
-    * No extension was supplied. Try PNG by appending .png.
+    * No extension was supplied. Try PNG first, then GIF.
     * Return immediately on success so exactly one image 
     * handle remains active for readimage().
     */
@@ -710,6 +1091,12 @@ static int openimage(char *filename, char *packfile) {
     snprintf(fnam, sizeof(fnam), "%s.png", filename);
     if(openpng(fnam, packfile)) {
         open_type = OT_PNG;
+        return 1;
+    }
+
+    snprintf(fnam, sizeof(fnam), "%s.gif", filename);
+    if(opengif(fnam, packfile)) {
+        open_type = OT_GIF;
         return 1;
     }
 
@@ -722,6 +1109,14 @@ static int readimage(unsigned char *buf, unsigned char *pal, int maxwidth, int m
 
     switch(open_type)
     {
+    case OT_GIF:
+        result = readgif(buf, pal, maxwidth, maxheight);
+#ifdef VERBOSE
+        printf("calling readimage %p %p %d %d with format %s, result is %d\n",
+            buf, pal, maxwidth, maxheight, "GIF", result);
+#endif
+        break;
+
     case OT_PNG:
         result = readpng(buf, pal, maxwidth, maxheight);
 #ifdef VERBOSE
@@ -819,10 +1214,8 @@ int loadscreen(char *filename, char *packfile, unsigned char *pal, int format, s
 * Original date and author unknown, reworked 2026-06-01.
 *
 * Loads a PNG image into a screen. The screen is 
-* allocated on-the-fly. Rework removes legacy BMP, PCX, 
-* and GIF support, simplifies the interface, and replaces 
-* asserts with defensive checks that return failure. The 
-* caller is responsible for handling the failure.
+* allocated on-the-fly. GIF backgrounds are loaded
+* through loadscreen() instead.
 */
 int loadscreen32(char *filename, char *packfile, s_screen **screen) {
 

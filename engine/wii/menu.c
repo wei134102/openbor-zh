@@ -1090,7 +1090,7 @@ static int wii_hd_video_prompt(int hres, int vres)
 	return downgrade;
 }
 
-void wii_apply_hd_videomode_policy(int *mode, int *hres, int *vres)
+void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 {
 	char flag;
 	int pixels;

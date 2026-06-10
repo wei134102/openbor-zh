@@ -12,7 +12,7 @@
 void Menu();
 
 #if WII
-void wii_apply_hd_videomode_policy(int *mode, int *hres, int *vres);
+void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres);
 #endif
 
 #endif

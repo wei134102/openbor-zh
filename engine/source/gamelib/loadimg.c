@@ -597,10 +597,15 @@ readpng_abort:
 }
 
 // ============================== GIF loading ===============================
-// GIF headers are byte-packed; without pack(1) the compiler inserts padding
-// after magic[6] and corrupts width/height (OOM on Wii).
+// GIF on-disk fields are little-endian. Parse them from raw bytes so width and
+// height are correct on both little- and big-endian hosts (Wii / PowerPC).
 
-#pragma pack(push, 1)
+#define GIF_MAX_DIMENSION 4096
+
+static unsigned short read_le16(const unsigned char *p)
+{
+    return (unsigned short)(p[0] | (p[1] << 8));
+}
 
 typedef struct
 {
@@ -616,10 +621,6 @@ typedef struct
     unsigned short  left, top, width, height;
     unsigned char   flags;
 } gifblockstruct;
-
-#pragma pack(pop)
-
-#define GIF_MAX_DIMENSION 4096
 
 static int gif_dimensions_valid(int width, int height)
 {
@@ -842,6 +843,8 @@ static void passgifblock(int handle)
 
 static int opengif(const char *filename, const char *packfilename)
 {
+    unsigned char hdr[13];
+
     if(image_load_handle >= 0)
     {
         closepackfile(image_load_handle);
@@ -854,24 +857,28 @@ static int opengif(const char *filename, const char *packfilename)
         return 0;
     }
 
-    if(readpackfile(image_load_handle, &gif_header, sizeof(gifheaderstruct)) != sizeof(gifheaderstruct))
+    if(readpackfile(image_load_handle, hdr, sizeof(hdr)) != sizeof(hdr))
     {
         closepackfile(image_load_handle);
         image_load_handle = HANDLE_UNUSED;
         return 0;
     }
-    if(gif_header.magic[0] != 'G' || gif_header.magic[1] != 'I' || gif_header.magic[2] != 'F')
+    if(hdr[0] != 'G' || hdr[1] != 'I' || hdr[2] != 'F')
     {
         closepackfile(image_load_handle);
         image_load_handle = HANDLE_UNUSED;
         return 0;
     }
 
-    gif_header.screenwidth = SwapLSB16(gif_header.screenwidth);
-    gif_header.screenheight = SwapLSB16(gif_header.screenheight);
-
-    image_res.width = gif_header.screenwidth;
-    image_res.height = gif_header.screenheight;
+    memset(&gif_header, 0, sizeof(gif_header));
+    memcpy(gif_header.magic, hdr, 6);
+    image_res.width = read_le16(hdr + 6);
+    image_res.height = read_le16(hdr + 8);
+    gif_header.screenwidth = image_res.width;
+    gif_header.screenheight = image_res.height;
+    gif_header.flags = hdr[10];
+    gif_header.background = hdr[11];
+    gif_header.aspect = hdr[12];
 
     if(!gif_dimensions_valid(image_res.width, image_res.height))
     {
@@ -961,15 +968,19 @@ static int readgif(unsigned char *buf, unsigned char *pal, int maxwidth, int max
         switch(c)
         {
         case ',':
-            if(readpackfile(image_load_handle, &iblock, sizeof(iblock)) != sizeof(iblock))
+        {
+            unsigned char block[9];
+
+            if(readpackfile(image_load_handle, block, sizeof(block)) != sizeof(block))
             {
                 return 0;
             }
 
-            iblock.left = SwapLSB16(iblock.left);
-            iblock.top = SwapLSB16(iblock.top);
-            iblock.width = SwapLSB16(iblock.width);
-            iblock.height = SwapLSB16(iblock.height);
+            iblock.left = read_le16(block + 0);
+            iblock.top = read_le16(block + 2);
+            iblock.width = read_le16(block + 4);
+            iblock.height = read_le16(block + 6);
+            iblock.flags = block[8];
 
             if(!gif_dimensions_valid(iblock.width, iblock.height))
             {
@@ -1002,6 +1013,7 @@ static int readgif(unsigned char *buf, unsigned char *pal, int maxwidth, int max
                 return 0;
             }
             break;
+        }
         case '!':
             passgifblock(image_load_handle);
             break;

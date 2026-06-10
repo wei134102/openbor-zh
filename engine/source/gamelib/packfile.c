@@ -46,6 +46,10 @@
 #define	stricmp	strcasecmp
 #endif
 
+#ifndef stricmp
+#define stricmp strcasecmp
+#endif
+
 #pragma pack (1)
 
 /////////////////////////////////////////////////////////////////////////////
@@ -549,7 +553,7 @@ int openPackfile(const char *filename, const char *packfilename) {
         pn.filestart = SwapLSB32(pn.filestart);
         pn.pns_len = SwapLSB32(pn.pns_len);
 
-        if(myfilenamecmp(pak_filename, strlen(pak_filename), pn.namebuf, strlen(pn.namebuf)) == 0) {
+        if(stricmp(pak_filename, pn.namebuf) == 0) {
             packhandle[h] = handle;
             packfilesize[h] = pn.filesize;
 
@@ -678,11 +682,7 @@ int openreadaheadpackfile(const char *filename, const char *packfilename, int re
         makefilenamecache();
     }
 
-#ifndef WIN
-    strncpy(target, slashback(filename), PACKFILE_PATH_MAX - 1);
-#else
     strncpy(target, filename, PACKFILE_PATH_MAX - 1);
-#endif
     target[PACKFILE_PATH_MAX - 1] = '\0';
     fnlc(target);
 

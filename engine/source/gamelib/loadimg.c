@@ -22,7 +22,6 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <limits.h>
-#include <zlib.h>
 
 #include "utils.h"
 #include "types.h"
@@ -30,6 +29,7 @@
 #include "bitmap.h"
 #include "screen.h"
 #include "packfile.h"
+#include "png.h"
 #include "pngdec.h"
 
 // ============================== Globals ===============================
@@ -55,66 +55,58 @@ typedef struct image_resolution {
 static image_resolution image_res = {.width = 0, .height = 0};
 
 // ============================== PNG loading ===============================
-// New PNG decoder by Plombo (2019-1-18) -- faster than the old libpng-based one
-// 
-// Caskey, Damon V., 2026-06-01 - Minor readability updates, clean up for 64-bit 
-// Win and drop interlaced support.
+// libpng loader restored from OpenBOR 3.0 for legacy mod compatibility on Wii.
 
-#define PNG_MAGIC        0x89504e470d0a1a0aLL
-#define PNG_CHUNK_IHDR   0x49484452
-#define PNG_CHUNK_PLTE   0x504c5445
-#define PNG_CHUNK_IDAT   0x49444154
-#define PNG_CHUNK_IEND   0x49454e44
+static int png_height = 0;
+static png_structp png_ptr = NULL;
+static png_infop info_ptr = NULL;
+static png_bytep *row_pointers = NULL;
 
-struct png_chunk_header {
-    uint32_t chunk_size;
-    uint32_t chunk_name;
-};
-
-static void closepng()
+static void png_read_fn(png_structp pngp, png_bytep outp, png_size_t size)
 {
-    if (image_load_handle >= 0)
+    readpackfile(image_load_handle, outp, (int)size);
+}
+
+static void png_read_destroy_all(void)
+{
+    if(png_ptr)
+    {
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    }
+    info_ptr = NULL;
+    png_ptr = NULL;
+}
+
+static void closepng(void)
+{
+    int y;
+
+    png_read_destroy_all();
+
+    if(row_pointers)
+    {
+        for(y = 0; y < png_height; y++)
+        {
+            free(row_pointers[y]);
+            row_pointers[y] = NULL;
+        }
+        free(row_pointers);
+        row_pointers = NULL;
+    }
+
+    png_height = 0;
+
+    if(image_load_handle >= 0)
     {
         closepackfile(image_load_handle);
     }
     image_load_handle = HANDLE_UNUSED;
 }
 
-/*
-* Caskey, Damon V.
-* Original date and author unknown, reworked 2026-06-01.
-*
-* Opens a PNG image from disk or the active pack file and reads
-* enough header information to validate the image and populate the
-* global image resolution values.
-*
-* Only 8-bit grayscale and indexed PNG images are supported. RGB,
-* RGBA, grayscale-alpha, and non-standard compression or filter
-* methods are rejected.
-*
-* Returns 1 on success, or 0 on error. On success, the pack file
-* handle remains open for readpng() and must later be released by
-* closepng().
-*/
-static const unsigned char PNG_SIGNATURE[8] = {
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
-};
-
-static uint32_t read_be32(const unsigned char *p)
+static int openpng(const char *filename, const char *packfilename)
 {
-    return ((uint32_t)p[0] << 24)
-         | ((uint32_t)p[1] << 16)
-         | ((uint32_t)p[2] << 8)
-         |  (uint32_t)p[3];
-}
-
-static int openpng(const char *filename, const char *packfilename) {
-
-    unsigned char png_sig[8];
-    unsigned char chunk_header_bytes[8];
-    unsigned char ihdr_data[13];
-    uint32_t width;
-    uint32_t height;
+    unsigned char header[8];
+    int y;
 
 #ifdef VERBOSE
     printf("openpng: entering filename='%s' pack='%s'\n",
@@ -122,483 +114,141 @@ static int openpng(const char *filename, const char *packfilename) {
            packfilename ? packfilename : "(null)");
 #endif
 
-    /*
-    * Close any previous image handle before attempting a 
-    * new open. This prevents stale handles from surviving 
-    * across failed opens.
-    */
     closepng();
 
     image_load_handle = openpackfile(filename, packfilename);
-    if(image_load_handle == HANDLE_UNUSED) {
+    if(image_load_handle == HANDLE_UNUSED)
+    {
         goto openpng_abort;
     }
 
-#ifdef VERBOSE
-    printf("openpng: openpackfile OK handle=%d\n", image_load_handle);
-#endif
-
-    /*
-    * Validate the 8-byte PNG signature from raw bytes so Wii / PowerPC
-    * builds do not depend on uint64 endian layout.
-    */
-    if(readpackfile(image_load_handle, png_sig, sizeof(png_sig)) != sizeof(png_sig)) {
+    if(readpackfile(image_load_handle, header, 8) != 8)
+    {
         goto openpng_abort;
     }
 
-    if(memcmp(png_sig, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) != 0) {
+    if(png_sig_cmp(header, 0, 8))
+    {
         goto openpng_abort;
     }
 
-    /*
-    * The first PNG chunk must be IHDR and its payload must be 13 bytes.
-    */
-    if(readpackfile(image_load_handle, chunk_header_bytes, sizeof(chunk_header_bytes)) != sizeof(chunk_header_bytes)) {
+    png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if(!png_ptr)
+    {
         goto openpng_abort;
     }
 
-    if(read_be32(chunk_header_bytes) != 13 ||
-            memcmp(chunk_header_bytes + 4, "IHDR", 4) != 0) {
+    png_set_read_fn(png_ptr, &image_load_handle, png_read_fn);
+
+    info_ptr = png_create_info_struct(png_ptr);
+    if(!info_ptr)
+    {
         goto openpng_abort;
     }
 
-    /*
-    * IHDR width and height are big-endian in the file.
-    */
-    if(readpackfile(image_load_handle, ihdr_data, sizeof(ihdr_data)) != sizeof(ihdr_data)) {
+    png_set_sig_bytes(png_ptr, 8);
+    png_read_info(png_ptr, info_ptr);
+
+    image_res.width = png_get_image_width(png_ptr, info_ptr);
+    png_height = image_res.height = png_get_image_height(png_ptr, info_ptr);
+
+    if(png_get_bit_depth(png_ptr, info_ptr) != 8)
+    {
         goto openpng_abort;
     }
 
-    width = read_be32(ihdr_data + 0);
-    height = read_be32(ihdr_data + 4);
-
-    /* 
-    * Check for zero dimensions, and also guard against 
-    * 32-bit integer overflow when converting to int. 
-    */
-   
-    if(width == 0 || height == 0 || width > INT_MAX || height > INT_MAX) {
-        printf("\n\n Error: The image %s has invalid dimensions.\n", filename);
+    if(image_res.width <= 0 || image_res.height <= 0)
+    {
         goto openpng_abort;
     }
 
-    image_res.width = (int)width;
-    image_res.height = (int)height;
+    png_read_update_info(png_ptr, info_ptr);
 
-    /*
-    * Bit depth must be 8 for engine use. PNG compression and filter
-    * method must be 0 by specification.
-    */
-    if(ihdr_data[8] != 8 || ihdr_data[10] != 0 || ihdr_data[11] != 0) {
-        printf("\n\n Error: The image %s has unsupported bit depth or compression/filter method. Use 8-bit PNG images with standard compression and filter methods.\n", filename);
+    row_pointers = (png_bytep *)malloc(sizeof(png_bytep) * png_height);
+    if(!row_pointers)
+    {
         goto openpng_abort;
     }
 
-    /*
-    * Color type must be grayscale or indexed. Truecolor, alpha, and
-    * truecolor-alpha PNG images are not supported by this loader.
-    */
-    if(ihdr_data[9] != 0 && ihdr_data[9] != 3) {
-        printf("\n\n Error: The image %s has unsupported color type. Use indexed PNG images.\n", filename);
-        goto openpng_abort;
+    for(y = 0; y < png_height; y++)
+    {
+        row_pointers[y] = (png_byte *)malloc(png_get_rowbytes(png_ptr, info_ptr));
+        if(!row_pointers[y])
+        {
+            goto openpng_abort;
+        }
     }
 
-    /*
-    * Interlaced PNGs are not supported. Local packed assets get no
-    * practical benefit from Adam7 interlacing, and supporting it adds
-    * decoder complexity. Use non-interlaced PNGs.
-    */
-    if(ihdr_data[12] != 0) {
-        printf("\n\n Error: The image %s is interlaced. Use non-interlaced PNG images.\n", filename);
-        goto openpng_abort;
-    }
-
+    png_read_image(png_ptr, row_pointers);
     return 1;
 
 openpng_abort:
-
-    /*
-    * If the PNG failed after opening a file or pack entry, release the
-    * handle before returning failure. If no handle was opened, leave the
-    * close path alone.
-    */
-    if(image_load_handle != HANDLE_UNUSED) {
-        closepackfile(image_load_handle);
-        image_load_handle = HANDLE_UNUSED;
-    }
-
+    closepng();
     return 0;
 }
 
-// Based on the PaethPredictor pseudocode in the PNG specification.
-// a = pixel to the left, b = above, c = upper left
-static inline unsigned char png_paeth_predictor(unsigned char a, unsigned char b, unsigned char c)
+static int readpng(unsigned char *buf, unsigned char *pal, int maxwidth, int maxheight)
 {
-    // initial estimate
-    int p = a + b - c;
+    int i, j, cw, ch;
+    png_colorp png_pal_ptr = 0;
+    int png_pal_num = 0;
+    int pb = PAL_BYTES;
 
-    // distances to a, b, c
-    int pa = abs(p - a);
-    int pb = abs(p - b);
-    int pc = abs(p - c);
-    
-    // return nearest of a,b,c, breaking ties in the order a,b,c
-    if (pa <= pb && pa <= pc) return a;
-    else if (pb <= pc) return b;
-    else return c;
-}
+    cw = image_res.width > maxwidth ? maxwidth : image_res.width;
+    ch = image_res.height > maxheight ? maxheight : image_res.height;
 
-// Decodes the image from a decompressed, non-interlaced IDAT stream.
-static void png_decode_data(unsigned char *buf, unsigned char *inflated_data, int max_width, int max_height)
-{
-    int width = image_res.width;
-    unsigned int y, x;
-
-    for (y = 0; y < max_height; y++)
+    if(buf)
     {
-        switch (inflated_data[y * (width + 1)])
+        for(i = 0; i < ch; i++)
         {
-            case 0: // no filter, the easiest case
+            memcpy(buf + (maxwidth * i), row_pointers[i], cw);
+        }
+    }
+
+    if(pal)
+    {
+        if(png_get_color_type(png_ptr, info_ptr) == PNG_COLOR_TYPE_GRAY)
+        {
+            for(i = 0; i < 256; i++)
             {
-                memcpy(buf + (y * max_width), inflated_data + (y * (width + 1)) + 1, max_width);
-                break;
+                pal[i * 3] = pal[i * 3 + 1] = pal[i * 3 + 2] = (unsigned char)i;
             }
-            case 1: // Sub filter: Raw(x) = Sub(x) + Raw(pixel to the left of x)
+            return 1;
+        }
+        else if(png_get_PLTE(png_ptr, info_ptr, &png_pal_ptr, &png_pal_num) != PNG_INFO_PLTE ||
+                png_pal_ptr == NULL)
+        {
+            return 0;
+        }
+
+        png_pal_ptr[0].red = png_pal_ptr[0].green = png_pal_ptr[0].blue = 0;
+
+        if(pb == 512)
+        {
+            for(i = 0, j = 0; i < 512 && j < png_pal_num; i += 2, j++)
             {
-                unsigned char last = 0;
-                for (x = 0; x < max_width; x++)
-                {
-                    last = buf[y * max_width + x] = inflated_data[y * (width + 1) + 1 + x] + last;
-                }
-                break;
+                *(unsigned short *)(pal + i) = colour16(png_pal_ptr[j].red, png_pal_ptr[j].green, png_pal_ptr[j].blue);
             }
-            case 2: // Up filter: Raw(x) = Up(x) + Raw(pixel above x)
+        }
+        else if(pb == 768)
+        {
+            for(i = 0; i < png_pal_num; i++)
             {
-                if (y == 0)
-                {
-                    memcpy(buf + (y * max_width), inflated_data + (y * (width + 1)) + 1, max_width);
-                }
-                else
-                {
-                    unsigned int lastline = y - 1;
-                    for (x = 0; x < max_width; x++)
-                    {
-                        buf[y * max_width + x] = inflated_data[y * (width + 1) + 1 + x] + buf[lastline * max_width + x];
-                    }
-                }
-                break;
+                pal[i * 3] = png_pal_ptr[i].red;
+                pal[i * 3 + 1] = png_pal_ptr[i].green;
+                pal[i * 3 + 2] = png_pal_ptr[i].blue;
             }
-            case 3: // Average filter: Raw(x) = Average(x) + floor((Raw(pixel above x) + Raw(pixel left of x))/2)
+        }
+        else if(pb == 1024)
+        {
+            for(i = 0, j = 0; i < 1024 && j < png_pal_num; i += 4, j++)
             {
-                unsigned char last = 0;
-                unsigned int lastline = y - 1;
-                for (x = 0; x < max_width; x++)
-                {
-                    unsigned char a = last;
-                    unsigned char b = (y == 0) ? 0 : buf[lastline * max_width + x];
-                    last = buf[y * max_width + x] = inflated_data[y * (width + 1) + 1 + x] + ((a + b) / 2);
-                }
-                break;
-            }
-            case 4: // Paeth filter: the complicated one
-            {
-                unsigned char last = 0;
-                unsigned int lastline = y - 1;
-                for (x = 0; x < max_width; x++)
-                {
-                    unsigned char a = last;
-                    unsigned char b = (y == 0) ? 0 : buf[lastline * max_width + x];
-                    unsigned char c = (y == 0 || x == 0) ? 0 : buf[lastline * max_width + x - 1];
-                    last = buf[y * max_width + x] = inflated_data[y * (width + 1) + 1 + x] + png_paeth_predictor(a, b, c);
-                }
-                break;
-            }
-            default:
-            {
-                printf("invalid PNG filter %i for line %u\n", inflated_data[y * (width + 1)], y);
-                assert(!"invalid PNG filter");
+                *(unsigned *)(pal + i) = colour32(png_pal_ptr[j].red, png_pal_ptr[j].green, png_pal_ptr[j].blue);
             }
         }
     }
-}
 
-/*
-* Caskey, Damon V.
-* Original date and author unknown, reworked 2026-06-01.
-*
-* Reads the PNG image data from the active pack 
-* file handle, inflates the IDAT chunks, and applies 
-* PNG filters. 2026-06-01 rework adds documentation 
-* and shores up some edge cases for PNG decoding and
-* 64-bit compatibility.
-*/
-static int readpng(unsigned char *buf, unsigned char *pal, int max_width, int max_height) {
-
-    unsigned char *png_data = NULL;
-    unsigned char *png_data_ptr = NULL;
-    unsigned char *inflated_data = NULL;
-    z_stream zlib_stream = {
-        .zalloc = Z_NULL, 
-        .zfree = Z_NULL, 
-        .opaque = Z_NULL, 
-        .avail_in = 0, 
-        .next_in = Z_NULL,
-        .avail_out = 0, 
-        .next_out = Z_NULL
-    };
-
-    int width = image_res.width;
-    int height = image_res.height;
-    int data_start_pos;
-    int data_size;
-    int z_lib_result = Z_OK;
-    int zlib_initialized = 0;
-
-    /*
-    * Initialize the zlib stream before reading IDAT chunks.
-    * readpng_abort calls inflateEnd(), so any failure after this
-    * point can use the common cleanup path. We then set a flag 
-    * to indicate that the zlib stream has been initialized for
-    * downstream guards.
-    */
-    if(inflateInit(&zlib_stream) != Z_OK) {
-        goto readpng_abort;
-    }
-
-    zlib_initialized = 1;
-
-    /*
-    * Read the remaining PNG data into memory. openpng() already read
-    * the PNG signature, IHDR chunk header, and IHDR payload. The file
-    * pointer is currently positioned just before the IHDR CRC, so skip
-    * four bytes to move to the next chunk.
-    *
-    * Loading the rest of the file into one buffer avoids repeated pack
-    * file I/O while walking PNG chunks.
-    */
-    int current_pos;
-    int end_pos;
-
-    current_pos = seekpackfile(image_load_handle, 0, SEEK_CUR);
-    end_pos = seekpackfile(image_load_handle, 0, SEEK_END);
-
-    if(current_pos < 0 || end_pos < 0) {
-        goto readpng_abort;
-    }
-
-    data_start_pos = current_pos + 4;
-
-    if(data_start_pos < current_pos || end_pos <= data_start_pos) {
-        goto readpng_abort;
-    }
-
-    data_size = end_pos - data_start_pos;
-
-    if(data_size <= 0) {
-        goto readpng_abort;
-    }
-
-    if(seekpackfile(image_load_handle, data_start_pos, SEEK_SET) < 0) {
-        goto readpng_abort;
-    }
-
-    png_data = malloc(data_size);
-
-    if(!png_data) {
-        goto readpng_abort;
-    }
-
-    if(readpackfile(image_load_handle, png_data, data_size) != data_size) {
-        goto readpng_abort;
-    }
-
-    png_data_ptr = png_data;    
-
-    /*
-    * If the caller supplied a pixel buffer, allocate space for the
-    * decompressed scanlines. Each PNG scanline begins with one filter
-    * byte, so the decompressed size is one extra byte per row.
-    *
-    * If buf is NULL, only palette data is being requested and the IDAT
-    * stream does not need to be inflated.
-    */
-
-    if(buf) {
-
-        size_t inflated_size;
-
-        inflated_size = ((size_t)width + 1) * (size_t)height;
-
-        if(inflated_size > UINT_MAX) {
-            goto readpng_abort;
-        }
-
-        inflated_data = malloc(inflated_size);
-
-        if(!inflated_data) {
-            goto readpng_abort;
-        }
-
-        zlib_stream.avail_out = (uInt)inflated_size;
-        zlib_stream.next_out = inflated_data;
-    }
-
-    /*
-    * Walk the remaining PNG chunks. The loader only needs PLTE for the
-    * palette and IDAT for pixel data. Other chunks are skipped.
-    *
-    * Chunk layout:
-    *   4 bytes - data length
-    *   4 bytes - chunk name
-    *   N bytes - chunk data
-    *   4 bytes - CRC
-    */
-
-    while(png_data_ptr < (png_data + data_size)) {
-
-        struct png_chunk_header chunk_header;
-        uint32_t chunk_size;
-        uint32_t chunk_name;
-        ptrdiff_t bytes_left;
-
-        bytes_left = (png_data + data_size) - png_data_ptr;
-
-        /*
-        * Make sure there is enough data left to read the chunk header.
-        * Using memcpy() avoids alignment and aliasing issues on 64-bit
-        * builds.
-        */
-        if(bytes_left < (ptrdiff_t)sizeof(chunk_header)) {
-            goto readpng_abort;
-        }
-
-        memcpy(&chunk_header, png_data_ptr, sizeof(chunk_header));
-
-        chunk_size = SwapMSB32(chunk_header.chunk_size);
-        chunk_name = chunk_header.chunk_name;
-
-        png_data_ptr += sizeof(chunk_header);
-        bytes_left = (png_data + data_size) - png_data_ptr;
-
-        /*
-        * Make sure the declared chunk payload and CRC are still inside
-        * the data buffer before reading or skipping the chunk.
-        */
-        if(bytes_left < 4 || chunk_size > (uint32_t)(bytes_left - 4)) {
-            goto readpng_abort;
-        }
-
-        /*
-        * IEND marks the formal end of the PNG stream. Stop here so
-        * palette-only reads do not keep walking into trailing data.
-        */
-        if(chunk_name == SwapMSB32(PNG_CHUNK_IEND)) {
-            png_data_ptr += chunk_size + 4;
-            break;
-        }
-
-        /*
-        * PLTE contains the image palette. This loader currently writes
-        * palette entries in the engine's 32-bit palette format.
-        */
-        if(pal && chunk_name == SwapMSB32(PNG_CHUNK_PLTE)) {
-
-            unsigned int ncolors = chunk_size / 3;
-            unsigned int i;
-            int *pal32 = (int*)pal;
-
-            if(chunk_size % 3 != 0 || ncolors > 256) {
-                goto readpng_abort;
-            }
-
-            for(i = 0; i < ncolors; i++) {
-                pal32[i] = colour32(png_data_ptr[0], png_data_ptr[1], png_data_ptr[2]);
-                png_data_ptr += 3;
-            }
-
-            /*
-            * Skip the PLTE CRC after reading the palette payload.
-            */
-            png_data_ptr += 4;
-
-        } else if(buf && chunk_name == SwapMSB32(PNG_CHUNK_IDAT)) {
-
-            /*
-            * IDAT chunks contain one continuous zlib stream split across
-            * one or more PNG chunks. Feed each IDAT payload to inflate()
-            * in file order.
-            */
-            zlib_stream.avail_in = chunk_size;
-            zlib_stream.next_in = png_data_ptr;
-
-            z_lib_result = inflate(&zlib_stream, Z_SYNC_FLUSH);
-
-            /*
-            * Move past the IDAT payload and CRC before checking whether
-            * zlib reached the end of the stream.
-            */
-            png_data_ptr += chunk_size + 4;
-
-            if(z_lib_result == Z_STREAM_END) {
-                break;
-            }
-
-            if(z_lib_result != Z_OK) {
-                printf("inflate failed: %i\n", z_lib_result);
-                goto readpng_abort;
-            }
-
-        } else {
-
-            /*
-            * Unused chunk. Skip payload and CRC.
-            */
-            png_data_ptr += chunk_size + 4;
-        }
-    }
-
-    /*
-    * If the caller requested pixel data, the zlib stream must have
-    * reached its natural end and the output buffer must be filled
-    * with exact pixel data. If not, something went wrong.
-    */
-
-    if(buf && (z_lib_result != Z_STREAM_END || zlib_stream.avail_out != 0)) {
-        goto readpng_abort;
-    }
-
-    /*
-    * Decode the decompressed scanlines into the destination buffer.
-    * PNG filtering is reversed here after all IDAT data has been
-    * inflated.
-    */
-
-    if(buf) {
-        png_decode_data(buf, inflated_data, max_width, max_height);
-    }
-
-    if(zlib_initialized) {
-        inflateEnd(&zlib_stream);
-    }
-
-    free(inflated_data);
-    free(png_data);
     return 1;
-
-readpng_abort:
-
-    /*
-    * Shared cleanup path for allocation, file read, PNG chunk, and zlib
-    * failures.
-    */
-    
-    if(zlib_initialized) {
-        inflateEnd(&zlib_stream);
-    }
-
-    free(inflated_data);
-    free(png_data);
-    return 0;
 }
 
 // ============================== GIF loading ===============================

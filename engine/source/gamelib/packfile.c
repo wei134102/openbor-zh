@@ -224,8 +224,7 @@ int myfilenamecmp(const char *a, size_t asize, const char *b, size_t bsize)
     return -2; // should never be reached
 }
 
-#if WIN
-// Convert slashes (UNIX) to backslashes (DOS).
+// Convert slashes (UNIX) to backslashes (DOS-style PAK paths).
 // Return a pointer to buffer with filename converted to DOS format.
 static char *slashback(const char *sz)
 {
@@ -243,7 +242,6 @@ static char *slashback(const char *sz)
     new[i] = 0;
     return new;
 }
-#endif
 
 #ifndef WIN
 // Convert backslashes (DOS) to forward slashes (everything else).
@@ -464,9 +462,13 @@ int openPackfile(const char *filename, const char *packfilename) {
     disk_filename = slashfwd(filename);
 #endif
 
-    // PAK lookup should compare normalized logical asset paths,
-    // not OS-specific filesystem paths.
+    // PAK index paths use DOS-style backslashes (DATA\CHARS\...).
+    // Match OpenBOR_PLUS / legacy pack tools on Wii and other non-Windows ports.
+#ifndef WIN
+    pak_filename = slashback(filename);
+#else
     pak_filename = filename;
+#endif
 
     packfilepointer[h] = 0;
     int file_permission = 666;
@@ -676,7 +678,12 @@ int openreadaheadpackfile(const char *filename, const char *packfilename, int re
         makefilenamecache();
     }
 
+#ifndef WIN
+    strncpy(target, slashback(filename), PACKFILE_PATH_MAX - 1);
+#else
     strncpy(target, filename, PACKFILE_PATH_MAX - 1);
+#endif
+    target[PACKFILE_PATH_MAX - 1] = '\0';
     fnlc(target);
 
     n = List_GetNodeByName(filenamelist, target);

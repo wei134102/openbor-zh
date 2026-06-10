@@ -96,13 +96,23 @@ static void closepng()
 * handle remains open for readpng() and must later be released by
 * closepng().
 */
+static const unsigned char PNG_SIGNATURE[8] = {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
+};
+
+static uint32_t read_be32(const unsigned char *p)
+{
+    return ((uint32_t)p[0] << 24)
+         | ((uint32_t)p[1] << 16)
+         | ((uint32_t)p[2] << 8)
+         |  (uint32_t)p[3];
+}
+
 static int openpng(const char *filename, const char *packfilename) {
 
-    uint64_t magic;
-    struct png_chunk_header chunk_header;
+    unsigned char png_sig[8];
+    unsigned char chunk_header_bytes[8];
     unsigned char ihdr_data[13];
-    uint32_t width_raw;
-    uint32_t height_raw;
     uint32_t width;
     uint32_t height;
 
@@ -129,43 +139,38 @@ static int openpng(const char *filename, const char *packfilename) {
 #endif
 
     /*
-    * Validate the 8 byte PNG signature. SwapMSB64() must use a true
-    * 64-bit integer type on all platforms, including Win64.
+    * Validate the 8-byte PNG signature from raw bytes so Wii / PowerPC
+    * builds do not depend on uint64 endian layout.
     */
-    if(readpackfile(image_load_handle, &magic, 8) != 8) {
+    if(readpackfile(image_load_handle, png_sig, sizeof(png_sig)) != sizeof(png_sig)) {
         goto openpng_abort;
     }
 
-    if(magic != SwapMSB64(PNG_MAGIC)) {
+    if(memcmp(png_sig, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) != 0) {
         goto openpng_abort;
     }
 
     /*
     * The first PNG chunk must be IHDR and its payload must be 13 bytes.
     */
-    if(readpackfile(image_load_handle, &chunk_header, sizeof(chunk_header)) != sizeof(chunk_header)) {
+    if(readpackfile(image_load_handle, chunk_header_bytes, sizeof(chunk_header_bytes)) != sizeof(chunk_header_bytes)) {
         goto openpng_abort;
     }
 
-    if(SwapMSB32(chunk_header.chunk_size) != 13 ||
-            chunk_header.chunk_name != SwapMSB32(PNG_CHUNK_IHDR)) {
+    if(read_be32(chunk_header_bytes) != 13 ||
+            memcmp(chunk_header_bytes + 4, "IHDR", 4) != 0) {
         goto openpng_abort;
     }
 
     /*
-    * Read the IHDR payload. Use memcpy() instead of casting the byte
-    * buffer to uint32_t*. Casting can violate alignment and aliasing
-    * rules, especially on 64-bit builds.
+    * IHDR width and height are big-endian in the file.
     */
     if(readpackfile(image_load_handle, ihdr_data, sizeof(ihdr_data)) != sizeof(ihdr_data)) {
         goto openpng_abort;
     }
 
-    memcpy(&width_raw, ihdr_data + 0, sizeof(width_raw));
-    memcpy(&height_raw, ihdr_data + 4, sizeof(height_raw));
-
-    width = SwapMSB32(width_raw);
-    height = SwapMSB32(height_raw);
+    width = read_be32(ihdr_data + 0);
+    height = read_be32(ihdr_data + 4);
 
     /* 
     * Check for zero dimensions, and also guard against 
@@ -1070,23 +1075,43 @@ static const char *get_image_extension(const char *filename) {
 }
 
 /*
+* Copy filename without a trailing extension into dest.
+* Returns 1 if ext was present and stripped, else 0.
+*/
+static int copy_base_without_ext(char *dest, size_t destsize, const char *filename, const char *ext)
+{
+    size_t flen = strlen(filename);
+    size_t elen = strlen(ext);
+
+    if(flen <= elen || stricmp(filename + flen - elen, ext) != 0)
+    {
+        return 0;
+    }
+
+    snprintf(dest, destsize, "%.*s", (int)(flen - elen), filename);
+    return 1;
+}
+
+/*
 * Caskey, Damon V.
 * Original date and author unknown, reworked 2026-06-01.
 *
 * Opens a PNG or GIF image from disk or the active pack file and records the
 * detected image type for later readimage() and closeimage() calls.
 *
-* If filename already includes a supported extension, only that exact file is
-* tested. This avoids opening a valid image more than once and leaking pack
-* file handles.
+* Legacy OpenBOR modules often ship GIF assets while model data references
+* .png paths (or the reverse). When an explicit extension fails, the same
+* basename is tried with the other supported format before giving up.
 *
-* If filename has no supported extension, .png is tried first, then .gif.
+* Extensionless paths try .gif first, then .png, so older Wii modules load
+* without pak edits while 4.0 PNG modules still work when no GIF exists.
 *
 * Returns 1 on success, or 0 if no supported image could be opened.
 */
 static int openimage(char *filename, char *packfile) {
 
     char fnam[MAX_BUFFER_LEN];
+    char alt[MAX_BUFFER_LEN];
     const char *ext = NULL;
 
     /*
@@ -1121,6 +1146,15 @@ static int openimage(char *filename, char *packfile) {
                 return 1;
             }
 
+            if(copy_base_without_ext(fnam, sizeof(fnam), filename, ".png"))
+            {
+                snprintf(alt, sizeof(alt), "%s.gif", fnam);
+                if(opengif(alt, packfile)) {
+                    open_type = OT_GIF;
+                    return 1;
+                }
+            }
+
             return 0;
         }
 
@@ -1131,6 +1165,15 @@ static int openimage(char *filename, char *packfile) {
                 return 1;
             }
 
+            if(copy_base_without_ext(fnam, sizeof(fnam), filename, ".gif"))
+            {
+                snprintf(alt, sizeof(alt), "%s.png", fnam);
+                if(openpng(alt, packfile)) {
+                    open_type = OT_PNG;
+                    return 1;
+                }
+            }
+
             return 0;
         }
 
@@ -1139,20 +1182,18 @@ static int openimage(char *filename, char *packfile) {
     }
 
     /*
-    * No extension was supplied. Try PNG first, then GIF.
-    * Return immediately on success so exactly one image 
-    * handle remains active for readimage().
+    * No extension was supplied. Prefer GIF for legacy modules, then PNG.
     */
-
-    snprintf(fnam, sizeof(fnam), "%s.png", filename);
-    if(openpng(fnam, packfile)) {
-        open_type = OT_PNG;
-        return 1;
-    }
 
     snprintf(fnam, sizeof(fnam), "%s.gif", filename);
     if(opengif(fnam, packfile)) {
         open_type = OT_GIF;
+        return 1;
+    }
+
+    snprintf(fnam, sizeof(fnam), "%s.png", filename);
+    if(openpng(fnam, packfile)) {
+        open_type = OT_PNG;
         return 1;
     }
 

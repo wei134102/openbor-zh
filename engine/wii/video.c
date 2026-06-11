@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <malloc.h>
 #include <string.h>
+#include <stdio.h>
 #include <unistd.h>
 #include "types.h"
 #include "video.h"
@@ -53,6 +54,20 @@ int textureWidth, textureHeight; // dimensions of game screen
 static s_screen *yuvScreen;
 
 static int bytes_per_pixel;
+
+static void wii_video_log_mode(const char *tag)
+{
+	printf("[WIIVIDEO] %s: tex=%dx%d viewport=%dx%d scaled=%dx%d offset=(%d,%d) stretch=%d bpp=%d mode=%d hScale=%.2f vScale=%.2f hShift=%d vShift=%d\n",
+		tag,
+		textureWidth, textureHeight,
+		viewportWidth, viewportHeight,
+		scaledWidth, scaledHeight,
+		xoffset, yoffset,
+		stretch, bytes_per_pixel,
+		videomodes.mode,
+		videomodes.hScale, videomodes.vScale,
+		videomodes.hShift, videomodes.vShift);
+}
 
 /**
  * Initializes GX, the API used for communicating with the Flipper/Hollywood GPU.
@@ -155,6 +170,9 @@ void video_init()
 	video_gx_init();
 
 	inited = 1;
+	printf("[WIIVIDEO] video_init: viewport=%dx%d aspect=%s\n",
+		viewportWidth, viewportHeight,
+		(CONF_GetAspectRatio() == CONF_ASPECT_16_9) ? "16:9" : "4:3");
 	// finally, the video is up and ready for use :)
 }
 
@@ -221,6 +239,7 @@ int video_set_mode(s_videomodes videomodes)
 		GX_InitTexObj(&texture[1], texturemem[1], textureWidth, textureHeight, texture_formats[bytes_per_pixel-1], GX_CLAMP, GX_CLAMP, GX_FALSE);
 	}
 
+	wii_video_log_mode("video_set_mode");
 	return 1;
 }
 
@@ -253,6 +272,8 @@ void video_draw_quad(int x, int y, int width, int height)
  */
 int video_copy_screen(s_screen* src)
 {
+	static int copy_log_frames = 0;
+
 	if(src == NULL)
 	{
 		return 0;
@@ -261,6 +282,8 @@ int video_copy_screen(s_screen* src)
 	/* Keep GX texture size in sync with the game framebuffer (e.g. HD->320x240 downgrade). */
 	if(src->width != textureWidth || src->height != textureHeight)
 	{
+		printf("[WIIVIDEO] texture mismatch: src=%dx%d tex=%dx%d -> resync videomode\n",
+			src->width, src->height, textureWidth, textureHeight);
 		videomodes.hRes = (short)src->width;
 		videomodes.vRes = (short)src->height;
 		if(!video_set_mode(videomodes))
@@ -268,6 +291,21 @@ int video_copy_screen(s_screen* src)
 			return 0;
 		}
 	}
+
+	if(copy_log_frames < 8 || (copy_log_frames % 600) == 0)
+	{
+		printf("[WIIVIDEO] copy_screen #%d: src=%dx%d tex=%dx%d draw=%s %dx%d @(%d,%d) stretch=%d\n",
+			copy_log_frames,
+			src->width, src->height,
+			textureWidth, textureHeight,
+			stretch ? "stretch" : "scaled",
+			stretch ? viewportWidth : scaledWidth,
+			stretch ? viewportHeight : scaledHeight,
+			stretch ? 0 : xoffset,
+			stretch ? 0 : yoffset,
+			stretch);
+	}
+	copy_log_frames++;
 
 	whichtexture ^= 1;
 
@@ -328,6 +366,7 @@ void video_stretch(int enable)
 	GX_CopyDisp(xfb[whichbuffer^1], GX_TRUE); // clear the EFB
 	GX_Flush();
 	stretch = enable;
+	printf("[WIIVIDEO] video_stretch(%d)\n", enable);
 }
 
 /**

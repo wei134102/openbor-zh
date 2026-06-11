@@ -1026,6 +1026,7 @@ static char wii_read_hdvm_flag(void)
 		flag = 0;
 	}
 	fclose(handle);
+	printf("[HDVM] read flag '%c' from %s\n", flag ? flag : '0', path);
 	return flag;
 }
 
@@ -1043,10 +1044,19 @@ static void wii_write_hdvm_flag(char flag)
 	handle = fopen(path, "wb");
 	if(handle == NULL)
 	{
+		printf("[HDVM] write flag FAILED path=%s flag=%c\n", path, flag);
 		return;
 	}
 	fwrite(&flag, 1, 1, handle);
 	fclose(handle);
+	printf("[HDVM] wrote flag '%c' -> %s\n", flag, path);
+}
+
+static void wii_hd_log_state(const char *tag, int mode, int hres, int vres, int downgraded, const char *note)
+{
+	float orig_aspect = (hres > 0 && vres > 0) ? ((float)hres / (float)vres) : 0.0f;
+	printf("[HDVM] %s: mode=%d res=%dx%d pixels=%d aspect=%.3f downgraded=%d %s\n",
+		tag, mode, hres, vres, hres * vres, orig_aspect, downgraded, note ? note : "");
 }
 
 static int wii_hd_video_prompt(int hres, int vres)
@@ -1099,21 +1109,40 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 	int display_h = 0;
 	int display_v = 0;
 	int downgrade;
+	int orig_mode;
+	int orig_h = 0;
+	int orig_v = 0;
 
 	if(mode == NULL)
 	{
 		return;
 	}
 
+	orig_mode = *mode;
+	if(hres)
+	{
+		orig_h = *hres;
+	}
+	if(vres)
+	{
+		orig_v = *vres;
+	}
+	wii_mode_dimensions(orig_mode, orig_h, orig_v, &orig_h, &orig_v);
+
 	wii_hd_video_downgraded = 0;
 
 	pixels = wii_mode_pixels(*mode, hres ? *hres : 0, vres ? *vres : 0);
 	if(pixels <= WII_SAFE_VIDEO_PIXELS)
 	{
+		wii_hd_log_state("skip (safe res)", orig_mode, orig_h, orig_v, 0, "below HD threshold");
 		return;
 	}
 
+	wii_hd_log_state("HD mod detected", orig_mode, orig_h, orig_v, 0, "checking Saves/*.hdvm");
+
 	flag = wii_read_hdvm_flag();
+	printf("[HDVM] hdvm flag read: '%c' (0=none)\n", flag ? flag : '0');
+
 	if(flag == 'd')
 	{
 		wii_hd_video_downgraded = 1;
@@ -1126,14 +1155,20 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 		{
 			*vres = 240;
 		}
+		wii_hd_log_state("apply saved downgrade", orig_mode, orig_h, orig_v, 1, "-> mode 0 320x240");
+		printf("[HDVM] WARN aspect change: %.3f -> %.3f (16:9 HD mod forced to 4:3 may clip view)\n",
+			(orig_v > 0) ? ((float)orig_h / (float)orig_v) : 0.0f,
+			320.0f / 240.0f);
 		return;
 	}
 	if(flag == 'h')
 	{
+		wii_hd_log_state("keep HD (saved)", orig_mode, orig_h, orig_v, 0, "user chose keep HD before");
 		return;
 	}
 
 	wii_mode_dimensions(*mode, hres ? *hres : 0, vres ? *vres : 0, &display_h, &display_v);
+	printf("[HDVM] showing prompt for %dx%d\n", display_h, display_v);
 	downgrade = wii_hd_video_prompt(display_h, display_v);
 	wii_write_hdvm_flag(downgrade ? 'd' : 'h');
 
@@ -1149,6 +1184,14 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 		{
 			*vres = 240;
 		}
+		wii_hd_log_state("user chose downgrade", orig_mode, orig_h, orig_v, 1, "-> mode 0 320x240");
+		printf("[HDVM] WARN aspect change: %.3f -> %.3f (16:9 HD mod forced to 4:3 may clip view)\n",
+			(orig_v > 0) ? ((float)orig_h / (float)orig_v) : 0.0f,
+			320.0f / 240.0f);
+	}
+	else
+	{
+		wii_hd_log_state("user chose keep HD", orig_mode, orig_h, orig_v, 0, "no change");
 	}
 }
 #endif

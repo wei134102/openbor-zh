@@ -46680,6 +46680,10 @@ void startup()
     {
         borShutdown(1, "Unable to set video mode: %d x %d!\n", videomodes.hRes, videomodes.vRes);
     }
+#if WII
+    printf("[VIDINIT] startup() video_set_mode done: %dx%d mode=%d hd_downgraded=%d\n",
+        videomodes.hRes, videomodes.vRes, videoMode, wii_hd_video_downgraded);
+#endif
 
     printf("Timer init...................\t");
     borTimerInit();
@@ -48885,6 +48889,10 @@ readfile:
                 {
                     videoMode = GET_INT_ARG(1);
                 }
+#if WII
+                printf("[VIDINIT] video.txt line: mode=%d hRes=%d vRes=%d\n",
+                    videoMode, videomodes.hRes, videomodes.vRes);
+#endif
             }
             else if(stricmp(command, "scenes") == 0)
             {
@@ -48936,6 +48944,8 @@ readfile:
 
 #if WII
     wii_apply_hd_videomode_policy(&videoMode, &videomodes.hRes, &videomodes.vRes);
+    printf("[VIDINIT] after HD policy: videoMode=%d hRes=%d vRes=%d hd_downgraded=%d\n",
+        videoMode, videomodes.hRes, videomodes.vRes, wii_hd_video_downgraded);
 #endif
 
 VIDEOMODES:
@@ -49073,6 +49083,14 @@ VIDEOMODES:
     {
         video_stretch(1);
     }
+    printf("[VIDINIT] final: mode=%d hRes=%d vRes=%d hScale=%.2f vScale=%.2f hShift=%d vShift=%d dOffset=%d\n",
+        videoMode, videomodes.hRes, videomodes.vRes,
+        videomodes.hScale, videomodes.vScale,
+        videomodes.hShift, videomodes.vShift, videomodes.dOffset);
+    printf("[VIDINIT] vscreen=%dx%d pixel=%d stretch=%d hd_downgraded=%d BGHEIGHT=%d PLAYER_Z=%d..%d\n",
+        vscreen->width, vscreen->height, videomodes.pixel,
+        savedata.stretch, wii_hd_video_downgraded,
+        BGHEIGHT, PLAYER_MIN_Z, PLAYER_MAX_Z);
 #endif
     clearscreen(vscreen);
 

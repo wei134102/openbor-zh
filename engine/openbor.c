@@ -5121,6 +5121,69 @@ int is_model_cache_index_selectable(int cache_index)
 	return 1;
 }
 
+#if WII
+static s_model *wii_findmodel_autoload(char *modelname)
+{
+	int index;
+
+	if(modelname == NULL)
+	{
+		return NULL;
+	}
+
+	index = get_cached_model_index(modelname);
+	if(index < 0)
+	{
+		return NULL;
+	}
+
+	if(model_cache[index].model)
+	{
+		return model_cache[index].model;
+	}
+
+	printf("[WII] lazy load model '%s'\n", modelname);
+	return load_cached_model(modelname, "wii_autoload", 0);
+}
+
+static int wii_is_selectable_player_cache_index(int cache_index)
+{
+	if(cache_index < 0 || cache_index >= (int)models_cached)
+	{
+		return 0;
+	}
+
+	if(!model_cache[cache_index].model)
+	{
+		if(!model_cache[cache_index].loadflag)
+		{
+			return 0;
+		}
+		if(stristr(model_cache[cache_index].path, "/players/") == NULL
+			&& stristr(model_cache[cache_index].path, "\\players\\") == NULL)
+		{
+			return 0;
+		}
+		load_cached_model(model_cache[cache_index].name, "select", 0);
+	}
+
+	if(!model_cache[cache_index].model)
+	{
+		return 0;
+	}
+
+	if(allowselect_args[0] == 'a' || allowselect_args[0] == 'A')
+	{
+		if(!model_cache[cache_index].selectable)
+		{
+			return 0;
+		}
+	}
+
+	return is_model_selectable(model_cache[cache_index].model);
+}
+#endif
+
 // Caskey, Damon V.
 // 2019-01-02
 //
@@ -5170,7 +5233,11 @@ int find_selectable_model_count()
 	// model.
 	for (i = 0; i < models_cached; i++)
 	{
+#if WII
+		if(wii_is_selectable_player_cache_index(i))
+#else
 		if (is_model_cache_index_selectable(i))
+#endif
 		{
 			++result;
 		}
@@ -5210,7 +5277,11 @@ s_model *nextplayermodel(s_model *current)
         }
 
 		// If valid and selectable, return the model.
+#if WII
+        if(wii_is_selectable_player_cache_index(i))
+#else
         if(is_model_cache_index_selectable(i))
+#endif
         {
 			//printf("next %s\n", model_cache[i].model->name);
 			return model_cache[i].model;            
@@ -5290,7 +5361,11 @@ s_model *prevplayermodel(s_model *current)
         }
 
 		// If valid and selectable, return the model.
+#if WII
+        if(wii_is_selectable_player_cache_index(i))
+#else
         if(is_model_cache_index_selectable(i))
+#endif
         {
             //printf("prev %s\n", model_cache[i].model->name);
             return model_cache[i].model;
@@ -18304,12 +18379,24 @@ int load_models()
         {
             global_model = i;
         }
+#if WII
+        if(stricmp(model_cache[i].name, "global_model") == 0)
+        {
+            load_cached_model(model_cache[i].name, "models.txt", 0);
+        }
+#else
         if(model_cache[i].loadflag)
         {
             load_cached_model(model_cache[i].name, "models.txt", 0);
             update_loading(&loadingbg[0], ++pos, modelLoadCount);
         }
+#endif
     }
+#if WII
+    printf("[WII] Deferred model loading: %d registered, %d startup loads skipped (lazy on demand)\n",
+        models_cached, modelLoadCount);
+    getRamStatus(BYTES);
+#endif
     printf("\nLoading models...............\tDone!\n");
 
 
@@ -46754,6 +46841,9 @@ void startup()
     printf("Done!\n");
 
     printf("Loading models...............\n\n");
+#if WII
+    set_findmodel_autoload(wii_findmodel_autoload);
+#endif
     load_models();
 
     printf("Object engine init...........\t");

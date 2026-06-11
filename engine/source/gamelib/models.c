@@ -14,6 +14,12 @@
 
 static List *modellist = NULL;
 static char convertbuf[MAX_MODELNAME_SIZE];
+static s_model *(*findmodel_autoload)(char *modelname) = NULL;
+
+void set_findmodel_autoload(s_model *(*fn)(char *))
+{
+    findmodel_autoload = fn;
+}
 
 void makelowercp(char *name)
 {
@@ -72,6 +78,10 @@ s_model *findmodel(char *modelname)
     if(List_FindByName(modellist, convertbuf))
     {
         temp = List_Retrieve(modellist);
+    }
+    if(!temp && findmodel_autoload)
+    {
+        temp = findmodel_autoload(modelname);
     }
     return temp;
 }

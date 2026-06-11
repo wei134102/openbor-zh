@@ -49067,6 +49067,13 @@ VIDEOMODES:
         break;
     }
 
+#if WII
+    if(wii_hd_video_downgraded)
+    {
+        wii_hd_scale_videomode_down(&videoMode);
+    }
+#endif
+
     video_stretch(savedata.stretch);
 
     if((vscreen = allocscreen(videomodes.hRes, videomodes.vRes, PIXEL_32)) == NULL)

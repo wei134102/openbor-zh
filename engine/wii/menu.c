@@ -32,6 +32,11 @@
 
 extern int videoMode;
 
+extern int PLAYER_MIN_Z;
+extern int PLAYER_MAX_Z;
+extern int BGHEIGHT;
+extern s_videomodes videomodes;
+
 #define RGB32(R,G,B) ((R << 16) | ((G) << 8) | (B))
 #define RGB16(R,G,B) ((B&0xF8)<<8) | ((G&0xFC)<<3) | (R>>3)
 #define RGB(R,G,B)   (bpp==16?RGB16(R,G,B):RGB32(R,G,B))
@@ -958,6 +963,72 @@ void setVideoMode()
 
 int wii_hd_video_downgraded = 0;
 
+#define WII_HD_TARGET_WIDTH 320
+
+void wii_hd_scale_videomode_down(int *videoMode)
+{
+	short orig_h, orig_v, target_h, target_v;
+	float rh, rv;
+
+	orig_h = videomodes.hRes;
+	orig_v = videomodes.vRes;
+	if(orig_h <= 0 || orig_v <= 0)
+	{
+		printf("[HDVM] scale skip: invalid source %dx%d\n", orig_h, orig_v);
+		return;
+	}
+
+	if(videomodes.hScale <= 0.0f)
+	{
+		videomodes.hScale = (float)orig_h / 320.0f;
+	}
+	if(videomodes.vScale <= 0.0f)
+	{
+		videomodes.vScale = (float)orig_v / 240.0f;
+	}
+
+	target_h = WII_HD_TARGET_WIDTH;
+	target_v = (short)(target_h * (float)orig_v / (float)orig_h + 0.5f);
+	target_v = (short)((target_v + 3) & ~3);
+	if(target_v < 160)
+	{
+		target_v = 160;
+	}
+	if(target_v > 272)
+	{
+		target_v = 272;
+		target_h = (short)(target_v * (float)orig_h / (float)orig_v + 0.5f);
+		target_h = (short)((target_h + 3) & ~3);
+	}
+
+	rh = (float)target_h / (float)orig_h;
+	rv = (float)target_v / (float)orig_v;
+
+	videomodes.hScale  *= rh;
+	videomodes.vScale  *= rv;
+	videomodes.hShift   = (short)(videomodes.hShift * rh);
+	videomodes.vShift   = (short)(videomodes.vShift * rv);
+	videomodes.dOffset  = (short)(videomodes.dOffset * rv);
+	PLAYER_MIN_Z = (int)(PLAYER_MIN_Z * rv);
+	PLAYER_MAX_Z = (int)(PLAYER_MAX_Z * rv);
+	BGHEIGHT     = (int)(BGHEIGHT * rv);
+
+	videomodes.hRes = target_h;
+	videomodes.vRes = target_v;
+	videomodes.mode = 255;
+	if(videoMode)
+	{
+		*videoMode = 255;
+	}
+
+	printf("[HDVM] proportional downgrade: %dx%d -> %dx%d rh=%.3f rv=%.3f aspect %.3f->%.3f\n",
+		orig_h, orig_v, target_h, target_v, rh, rv,
+		(float)orig_h / (float)orig_v, (float)target_h / (float)target_v);
+	printf("[HDVM] scaled params: hScale=%.2f vScale=%.2f hShift=%d vShift=%d dOffset=%d BGHEIGHT=%d PLAYER_Z=%d..%d\n",
+		videomodes.hScale, videomodes.vScale, videomodes.hShift, videomodes.vShift,
+		videomodes.dOffset, BGHEIGHT, PLAYER_MIN_Z, PLAYER_MAX_Z);
+}
+
 static int wii_mode_pixels(int mode, int hres, int vres)
 {
 	if(mode == 255)
@@ -1146,19 +1217,7 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 	if(flag == 'd')
 	{
 		wii_hd_video_downgraded = 1;
-		*mode = 0;
-		if(hres)
-		{
-			*hres = 320;
-		}
-		if(vres)
-		{
-			*vres = 240;
-		}
-		wii_hd_log_state("apply saved downgrade", orig_mode, orig_h, orig_v, 1, "-> mode 0 320x240");
-		printf("[HDVM] WARN aspect change: %.3f -> %.3f (16:9 HD mod forced to 4:3 may clip view)\n",
-			(orig_v > 0) ? ((float)orig_h / (float)orig_v) : 0.0f,
-			320.0f / 240.0f);
+		wii_hd_log_state("apply saved downgrade", orig_mode, orig_h, orig_v, 1, "proportional scale after VIDEOMODES");
 		return;
 	}
 	if(flag == 'h')
@@ -1175,19 +1234,7 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 	if(downgrade)
 	{
 		wii_hd_video_downgraded = 1;
-		*mode = 0;
-		if(hres)
-		{
-			*hres = 320;
-		}
-		if(vres)
-		{
-			*vres = 240;
-		}
-		wii_hd_log_state("user chose downgrade", orig_mode, orig_h, orig_v, 1, "-> mode 0 320x240");
-		printf("[HDVM] WARN aspect change: %.3f -> %.3f (16:9 HD mod forced to 4:3 may clip view)\n",
-			(orig_v > 0) ? ((float)orig_h / (float)orig_v) : 0.0f,
-			320.0f / 240.0f);
+		wii_hd_log_state("user chose downgrade", orig_mode, orig_h, orig_v, 1, "proportional scale after VIDEOMODES");
 	}
 	else
 	{

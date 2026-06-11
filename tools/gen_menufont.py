@@ -6,7 +6,7 @@ import struct
 from PIL import Image, ImageDraw, ImageFont
 
 # All unique Chinese characters used in Wii menu strings
-CHARS = "开始游戏音乐播放查看日志退出无模组文件夹中未找到共个高分辨率占用内存大降至320x240保持当前选择建议"
+CHARS = "开始游戏音乐播放查看日志退出无模组文件夹中未找到共个高分辨率占用内存大降至320x240保持当前选择建议宽比例"
 
 WIDTH = 12
 HEIGHT = 12

@@ -966,21 +966,30 @@ short wii_render_vres = 0;
 float wii_render_scale_h = 1.0f;
 float wii_render_scale_v = 1.0f;
 
-#define WII_HD_TARGET_WIDTH 320
+#define WII_HD_MAX_OPTIONS 12
 
-void wii_hd_scale_videomode_down(int *videoMode)
+typedef struct
 {
-	short orig_h, orig_v, target_h, target_v;
+	short target_h;
+	short target_v;
+} wii_hd_render_option;
 
-	orig_h = videomodes.hRes;
-	orig_v = videomodes.vRes;
-	if(orig_h <= 0 || orig_v <= 0)
+static wii_hd_render_option wii_hd_options[WII_HD_MAX_OPTIONS];
+static int wii_hd_option_count = 0;
+static short wii_user_render_width = 0;
+
+static void wii_hd_compute_render_size(int orig_h, int orig_v, int req_w, short *out_h, short *out_v)
+{
+	short target_h, target_v;
+
+	if(req_w <= 0 || req_w >= orig_h)
 	{
-		printf("[HDVM] scale skip: invalid source %dx%d\n", orig_h, orig_v);
+		*out_h = (short)orig_h;
+		*out_v = (short)orig_v;
 		return;
 	}
 
-	target_h = WII_HD_TARGET_WIDTH;
+	target_h = (short)req_w;
 	target_v = (short)(target_h * (float)orig_v / (float)orig_h + 0.5f);
 	target_v = (short)((target_v + 3) & ~3);
 	if(target_v < 160)
@@ -993,6 +1002,73 @@ void wii_hd_scale_videomode_down(int *videoMode)
 		target_h = (short)(target_v * (float)orig_h / (float)orig_v + 0.5f);
 		target_h = (short)((target_h + 3) & ~3);
 	}
+
+	*out_h = target_h;
+	*out_v = target_v;
+}
+
+static int wii_hd_build_render_options(int orig_h, int orig_v)
+{
+	static const short preset_widths[] = { 0, 640, 560, 480, 432, 400, 360, 320, 280, 240 };
+	int i, n = 0;
+	short th, tv, last_h = -1;
+
+	wii_hd_option_count = 0;
+	if(orig_h <= 0 || orig_v <= 0)
+	{
+		return 0;
+	}
+
+	for(i = 0; i < (int)(sizeof(preset_widths) / sizeof(preset_widths[0])) && n < WII_HD_MAX_OPTIONS; i++)
+	{
+		if(preset_widths[i] == 0)
+		{
+			wii_hd_options[n].target_h = 0;
+			wii_hd_options[n].target_v = 0;
+			n++;
+			continue;
+		}
+
+		wii_hd_compute_render_size(orig_h, orig_v, preset_widths[i], &th, &tv);
+		if(th >= orig_h)
+		{
+			continue;
+		}
+		if(th == last_h)
+		{
+			continue;
+		}
+
+		last_h = th;
+		wii_hd_options[n].target_h = th;
+		wii_hd_options[n].target_v = tv;
+		n++;
+	}
+
+	wii_hd_option_count = n;
+	return n;
+}
+
+void wii_hd_scale_videomode_down(int *videoMode)
+{
+	short orig_h, orig_v, target_h, target_v;
+
+	(void)videoMode;
+
+	orig_h = videomodes.hRes;
+	orig_v = videomodes.vRes;
+	if(orig_h <= 0 || orig_v <= 0)
+	{
+		printf("[HDVM] scale skip: invalid source %dx%d\n", orig_h, orig_v);
+		return;
+	}
+
+	if(wii_user_render_width <= 0)
+	{
+		wii_user_render_width = 320;
+	}
+
+	wii_hd_compute_render_size(orig_h, orig_v, wii_user_render_width, &target_h, &target_v);
 
 	wii_render_hres = target_h;
 	wii_render_vres = target_v;
@@ -1051,54 +1127,6 @@ static void wii_mode_dimensions(int mode, int hres, int vres, int *out_h, int *o
 	}
 }
 
-static char wii_read_hdvm_flag(void)
-{
-	FILE *handle;
-	char path[MAX_BUFFER_LEN] = {""};
-	char tmpname[MAX_FILENAME_LEN] = {""};
-	char flag = 0;
-
-	getBasePath(path, "Saves", 0);
-	getPakName(tmpname, 99);
-	strcat(path, tmpname);
-	strcat(path, ".hdvm");
-
-	handle = fopen(path, "rb");
-	if(handle == NULL)
-	{
-		return 0;
-	}
-	if(fread(&flag, 1, 1, handle) != 1)
-	{
-		flag = 0;
-	}
-	fclose(handle);
-	printf("[HDVM] read flag '%c' from %s\n", flag ? flag : '0', path);
-	return flag;
-}
-
-static void wii_write_hdvm_flag(char flag)
-{
-	FILE *handle;
-	char path[MAX_BUFFER_LEN] = {""};
-	char tmpname[MAX_FILENAME_LEN] = {""};
-
-	getBasePath(path, "Saves", 0);
-	getPakName(tmpname, 99);
-	strcat(path, tmpname);
-	strcat(path, ".hdvm");
-
-	handle = fopen(path, "wb");
-	if(handle == NULL)
-	{
-		printf("[HDVM] write flag FAILED path=%s flag=%c\n", path, flag);
-		return;
-	}
-	fwrite(&flag, 1, 1, handle);
-	fclose(handle);
-	printf("[HDVM] wrote flag '%c' -> %s\n", flag, path);
-}
-
 static void wii_hd_log_state(const char *tag, int mode, int hres, int vres, int downgraded, const char *note)
 {
 	float orig_aspect = (hres > 0 && vres > 0) ? ((float)hres / (float)vres) : 0.0f;
@@ -1106,10 +1134,43 @@ static void wii_hd_log_state(const char *tag, int mode, int hres, int vres, int 
 		tag, mode, hres, vres, hres * vres, orig_aspect, downgraded, note ? note : "");
 }
 
+static int wii_hd_default_option(int count)
+{
+	int i;
+
+	for(i = 0; i < count; i++)
+	{
+		if(wii_hd_options[i].target_h == 320)
+		{
+			return i;
+		}
+	}
+
+	for(i = count - 1; i >= 0; i--)
+	{
+		if(wii_hd_options[i].target_h > 0)
+		{
+			return i;
+		}
+	}
+
+	return 0;
+}
+
 static int wii_hd_video_prompt(int hres, int vres)
 {
 	int done = 0;
-	int downgrade = 1;
+	int count = 0;
+	int selected = 0;
+	int scroll = 0;
+	int list = 0;
+	int index = 0;
+	int shift = 0;
+	int colors = 0;
+	int visible = 0;
+	int base_x = 0;
+	int base_y = 0;
+	int line_h = 11;
 
 	if(CONF_GetAspectRatio() == CONF_ASPECT_16_9)
 	{
@@ -1120,42 +1181,117 @@ static int wii_hd_video_prompt(int hres, int vres)
 		isWide = 0;
 	}
 
+	count = wii_hd_build_render_options(hres, vres);
+	if(count < 1)
+	{
+		return 0;
+	}
+
+	selected = wii_hd_default_option(count);
+	visible = isWide ? 8 : 6;
+	base_x = isWide ? 36 : 10;
+	base_y = isWide ? 96 : 86;
+
 	setVideoMode();
 	initMenu(1);
 
 	while(!done)
 	{
 		copyScreens(Source);
-		printText((isWide ? 40 : 12), (isWide ? 60 : 50), YELLOW, 0, 0, MENU_STR_HD_TITLE);
-		printText((isWide ? 40 : 12), (isWide ? 80 : 70), ORANGE, 0, 0, MENU_STR_HD_INFO, hres, vres);
-		printText((isWide ? 40 : 12), (isWide ? 110 : 100), GREEN, 0, 0, MENU_STR_HD_YES);
-		printText((isWide ? 40 : 12), (isWide ? 130 : 120), PURPLE, 0, 0, MENU_STR_HD_NO);
+		printText((isWide ? 40 : 12), (isWide ? 52 : 44), YELLOW, 0, 0, MENU_STR_HD_TITLE);
+		printText((isWide ? 40 : 12), (isWide ? 68 : 60), ORANGE, 0, 0, MENU_STR_HD_INFO, hres, vres);
+
+		for(list = 0; list < visible; list++)
+		{
+			index = scroll + list;
+			if(index >= count)
+			{
+				break;
+			}
+
+			shift = 0;
+			colors = GRAY;
+			if(index == selected)
+			{
+				shift = 2;
+				colors = RED;
+			}
+
+			if(wii_hd_options[index].target_h <= 0)
+			{
+				printText(base_x + shift, base_y + line_h * list, colors, 0, 0,
+					MENU_STR_HD_OPT_FULL, hres, vres);
+			}
+			else
+			{
+				printText(base_x + shift, base_y + line_h * list, colors, 0, 0,
+					MENU_STR_HD_OPT_RENDER,
+					wii_hd_options[index].target_h, wii_hd_options[index].target_v);
+			}
+		}
+
+		printText((isWide ? 40 : 12), (isWide ? 248 : 218), GREEN, 0, 0, MENU_STR_HD_HINT);
 		drawScreens(NULL, 0, 0);
 
 		refreshInput();
-		if(buttonsPressed & (WIIMOTE_A | WIIMOTE_1 | WIIMOTE_PLUS | CC_A | CC_PLUS | GC_A | GC_START))
+		buttonsPressed |= hold_key_impulse(DIR_UP, IMPULSE_TIME, FIRST_KEYPRESS, FIRST_IMPULSE_TIME);
+		buttonsPressed |= hold_key_impulse(DIR_DOWN, IMPULSE_TIME, FIRST_KEYPRESS, FIRST_IMPULSE_TIME);
+
+		switch(buttonsPressed)
 		{
-			downgrade = 1;
+		case DIR_UP:
+			if(selected > 0)
+			{
+				selected--;
+			}
+			if(selected < scroll)
+			{
+				scroll = selected;
+			}
+			break;
+
+		case DIR_DOWN:
+			if(selected < count - 1)
+			{
+				selected++;
+			}
+			if(selected >= scroll + visible)
+			{
+				scroll = selected - visible + 1;
+			}
+			break;
+
+		case WIIMOTE_A:
+		case WIIMOTE_1:
+		case WIIMOTE_PLUS:
+		case CC_A:
+		case CC_PLUS:
+		case GC_A:
+		case GC_START:
 			done = 1;
-		}
-		else if(buttonsPressed & (WIIMOTE_B | NUNCHUK_Z | CC_B | GC_B))
-		{
-			downgrade = 0;
-			done = 1;
+			break;
+
+		default:
+			break;
 		}
 	}
 
+	wii_user_render_width = wii_hd_options[selected].target_h;
+	printf("[HDVM] user selected render width=%d (%dx%d logic=%dx%d)\n",
+		wii_user_render_width,
+		wii_hd_options[selected].target_h, wii_hd_options[selected].target_v,
+		hres, vres);
+
 	termMenu();
-	return downgrade;
+	return wii_user_render_width;
 }
 
 void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 {
-	char flag;
 	int pixels;
 	int display_h = 0;
 	int display_v = 0;
-	int downgrade;
+	int choice;
 	int orig_mode;
 	int orig_h = 0;
 	int orig_v = 0;
@@ -1177,6 +1313,7 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 	wii_mode_dimensions(orig_mode, orig_h, orig_v, &orig_h, &orig_v);
 
 	wii_hd_video_downgraded = 0;
+	wii_user_render_width = 0;
 	wii_render_hres = 0;
 	wii_render_vres = 0;
 	wii_render_scale_h = 1.0f;
@@ -1189,36 +1326,20 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 		return;
 	}
 
-	wii_hd_log_state("HD mod detected", orig_mode, orig_h, orig_v, 0, "checking Saves/*.hdvm");
-
-	flag = wii_read_hdvm_flag();
-	printf("[HDVM] hdvm flag read: '%c' (0=none)\n", flag ? flag : '0');
-
-	if(flag == 'd')
-	{
-		wii_hd_video_downgraded = 1;
-		wii_hd_log_state("apply saved downgrade", orig_mode, orig_h, orig_v, 1, "proportional scale after VIDEOMODES");
-		return;
-	}
-	if(flag == 'h')
-	{
-		wii_hd_log_state("keep HD (saved)", orig_mode, orig_h, orig_v, 0, "user chose keep HD before");
-		return;
-	}
+	wii_hd_log_state("HD mod detected", orig_mode, orig_h, orig_v, 0, "show resolution picker every launch");
 
 	wii_mode_dimensions(*mode, hres ? *hres : 0, vres ? *vres : 0, &display_h, &display_v);
-	printf("[HDVM] showing prompt for %dx%d\n", display_h, display_v);
-	downgrade = wii_hd_video_prompt(display_h, display_v);
-	wii_write_hdvm_flag(downgrade ? 'd' : 'h');
+	printf("[HDVM] showing resolution menu for logic %dx%d\n", display_h, display_v);
+	choice = wii_hd_video_prompt(display_h, display_v);
 
-	if(downgrade)
+	if(choice <= 0)
 	{
-		wii_hd_video_downgraded = 1;
-		wii_hd_log_state("user chose downgrade", orig_mode, orig_h, orig_v, 1, "proportional scale after VIDEOMODES");
+		wii_hd_log_state("user chose original", orig_mode, orig_h, orig_v, 0, "full framebuffer");
 	}
 	else
 	{
-		wii_hd_log_state("user chose keep HD", orig_mode, orig_h, orig_v, 0, "no change");
+		wii_hd_video_downgraded = 1;
+		wii_hd_log_state("user chose render buffer", orig_mode, orig_h, orig_v, 1, "scaled draw after VIDEOMODES");
 	}
 }
 #endif

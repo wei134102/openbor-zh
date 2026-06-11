@@ -15,6 +15,87 @@
 #include "draw.h"
 #include "globals.h"
 
+#if WII
+extern int wii_hd_video_downgraded;
+extern float wii_render_scale_h;
+extern float wii_render_scale_v;
+
+static int wii_scale_coord_h(int v)
+{
+    if(!wii_hd_video_downgraded)
+    {
+        return v;
+    }
+    return (int)(v * wii_render_scale_h + 0.5f);
+}
+
+static int wii_scale_coord_v(int v)
+{
+    if(!wii_hd_video_downgraded)
+    {
+        return v;
+    }
+    return (int)(v * wii_render_scale_v + 0.5f);
+}
+
+static void wii_scale_drawmethod(s_drawmethod *dm)
+{
+    if(!wii_hd_video_downgraded || dm == NULL)
+    {
+        return;
+    }
+
+    if(!(dm->config & DRAWMETHOD_CONFIG_ENABLED))
+    {
+        *dm = plainmethod;
+    }
+
+    dm->scalex = (int)(dm->scalex * wii_render_scale_h);
+    dm->scaley = (int)(dm->scaley * wii_render_scale_v);
+    if(dm->scalex < 1)
+    {
+        dm->scalex = 1;
+    }
+    if(dm->scaley < 1)
+    {
+        dm->scaley = 1;
+    }
+
+    dm->shiftx = wii_scale_coord_h(dm->shiftx);
+    dm->centerx = wii_scale_coord_h(dm->centerx);
+    dm->centery = wii_scale_coord_v(dm->centery);
+
+    if(dm->xspan)
+    {
+        dm->xspan = wii_scale_coord_h(dm->xspan);
+    }
+    if(dm->yspan)
+    {
+        dm->yspan = wii_scale_coord_v(dm->yspan);
+    }
+
+    if(dm->clipw > 0 && dm->cliph > 0)
+    {
+        dm->clipx = wii_scale_coord_h(dm->clipx);
+        dm->clipy = wii_scale_coord_v(dm->clipy);
+        dm->clipw = wii_scale_coord_h(dm->clipw);
+        dm->cliph = wii_scale_coord_v(dm->cliph);
+    }
+
+    if(dm->water.amplitude)
+    {
+        dm->water.amplitude = wii_scale_coord_h(dm->water.amplitude);
+    }
+}
+#else
+#define wii_scale_coord_h(v) (v)
+#define wii_scale_coord_v(v) (v)
+static void wii_scale_drawmethod(s_drawmethod *dm)
+{
+    (void)dm;
+}
+#endif
+
 // This should be enough for most games...
 // But bear in mind that text is also composed of sprites!
 #define			MAXQSPRITES		5000 // DEFAULT 5000
@@ -300,6 +381,12 @@ static void spriteq_sort()
 void spriteq_draw(s_screen *screen, int newonly, int minz, int maxz, int dx, int dy)
 {
     int i, x, y;
+    s_drawmethod drawmethod;
+
+#if WII
+    dx = wii_scale_coord_h(dx);
+    dy = wii_scale_coord_v(dy);
+#endif
 
     spriteq_sort();
 
@@ -310,8 +397,12 @@ void spriteq_draw(s_screen *screen, int newonly, int minz, int maxz, int dx, int
             continue;
         }
 
-        x = order[i]->x + dx;
-        y = order[i]->y + dy;
+        x = wii_scale_coord_h(order[i]->x + dx);
+        y = wii_scale_coord_v(order[i]->y + dy);
+        drawmethod = order[i]->drawmethod;
+#if WII
+        wii_scale_drawmethod(&drawmethod);
+#endif
 
         switch(order[i]->type)
         {
@@ -322,19 +413,25 @@ void spriteq_draw(s_screen *screen, int newonly, int minz, int maxz, int dx, int
                 ((s_sprite *)(order[i]->frame))->centerx = order[i]->params[1];
                 ((s_sprite *)(order[i]->frame))->centery = order[i]->params[2];
             }
-            putsprite(x, y, order[i]->frame, screen, &(order[i]->drawmethod));
+            putsprite(x, y, order[i]->frame, screen, &drawmethod);
             break;
         case SQT_SCREEN: // draw a screen instead of sprite
-            putscreen(screen, (s_screen *)(order[i]->frame), x, y, &(order[i]->drawmethod));
+            putscreen(screen, (s_screen *)(order[i]->frame), x, y, &drawmethod);
             break;
         case SQT_DOT:
-            putpixel(x, y, order[i]->params[0], screen, &(order[i]->drawmethod));
+            putpixel(x, y, order[i]->params[0], screen, &drawmethod);
             break;
         case SQT_LINE:
-            putline(x, y, order[i]->params[1] + dx, order[i]->params[2] + dy, order[i]->params[0], screen, &(order[i]->drawmethod));
+            putline(x, y,
+                    wii_scale_coord_h(order[i]->params[1] + dx),
+                    wii_scale_coord_v(order[i]->params[2] + dy),
+                    order[i]->params[0], screen, &drawmethod);
             break;
         case SQT_BOX:
-            putbox(x, y, order[i]->params[1], order[i]->params[2], order[i]->params[0], screen, &(order[i]->drawmethod));
+            putbox(x, y,
+                   wii_scale_coord_h(order[i]->params[1]),
+                   wii_scale_coord_v(order[i]->params[2]),
+                   order[i]->params[0], screen, &drawmethod);
             break;
         default:
             continue;

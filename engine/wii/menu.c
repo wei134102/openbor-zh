@@ -961,13 +961,16 @@ void setVideoMode()
 #define WII_SAFE_VIDEO_PIXELS (480 * 272)
 
 int wii_hd_video_downgraded = 0;
+short wii_render_hres = 0;
+short wii_render_vres = 0;
+float wii_render_scale_h = 1.0f;
+float wii_render_scale_v = 1.0f;
 
 #define WII_HD_TARGET_WIDTH 320
 
 void wii_hd_scale_videomode_down(int *videoMode)
 {
 	short orig_h, orig_v, target_h, target_v;
-	float rh, rv;
 
 	orig_h = videomodes.hRes;
 	orig_v = videomodes.vRes;
@@ -975,15 +978,6 @@ void wii_hd_scale_videomode_down(int *videoMode)
 	{
 		printf("[HDVM] scale skip: invalid source %dx%d\n", orig_h, orig_v);
 		return;
-	}
-
-	if(videomodes.hScale <= 0.0f)
-	{
-		videomodes.hScale = (float)orig_h / 320.0f;
-	}
-	if(videomodes.vScale <= 0.0f)
-	{
-		videomodes.vScale = (float)orig_v / 240.0f;
 	}
 
 	target_h = WII_HD_TARGET_WIDTH;
@@ -1000,32 +994,15 @@ void wii_hd_scale_videomode_down(int *videoMode)
 		target_h = (short)((target_h + 3) & ~3);
 	}
 
-	rh = (float)target_h / (float)orig_h;
-	rv = (float)target_v / (float)orig_v;
+	wii_render_hres = target_h;
+	wii_render_vres = target_v;
+	wii_render_scale_h = (float)target_h / (float)orig_h;
+	wii_render_scale_v = (float)target_v / (float)orig_v;
 
-	videomodes.hScale  *= rh;
-	videomodes.vScale  *= rv;
-	videomodes.hShift   = (short)(videomodes.hShift * rh);
-	videomodes.vShift   = (short)(videomodes.vShift * rv);
-	videomodes.dOffset  = (short)(videomodes.dOffset * rv);
-	PLAYER_MIN_Z = (int)(PLAYER_MIN_Z * rv);
-	PLAYER_MAX_Z = (int)(PLAYER_MAX_Z * rv);
-	BGHEIGHT     = (int)(BGHEIGHT * rv);
-
-	videomodes.hRes = target_h;
-	videomodes.vRes = target_v;
-	videomodes.mode = 255;
-	if(videoMode)
-	{
-		*videoMode = 255;
-	}
-
-	printf("[HDVM] proportional downgrade: %dx%d -> %dx%d rh=%.3f rv=%.3f aspect %.3f->%.3f\n",
-		orig_h, orig_v, target_h, target_v, rh, rv,
-		(float)orig_h / (float)orig_v, (float)target_h / (float)target_v);
-	printf("[HDVM] scaled params: hScale=%.2f vScale=%.2f hShift=%d vShift=%d dOffset=%d BGHEIGHT=%d PLAYER_Z=%d..%d\n",
-		videomodes.hScale, videomodes.vScale, videomodes.hShift, videomodes.vShift,
-		videomodes.dOffset, BGHEIGHT, PLAYER_MIN_Z, PLAYER_MAX_Z);
+	/* Keep videomodes.hRes/vRes and game params at HD values for camera/world coords.
+	 * Only the vscreen framebuffer and sprite drawing use wii_render_* scale. */
+	printf("[HDVM] render downgrade: logic=%dx%d -> framebuffer=%dx%d scale=%.3fx%.3f (camera unchanged)\n",
+		orig_h, orig_v, target_h, target_v, wii_render_scale_h, wii_render_scale_v);
 }
 
 static int wii_mode_pixels(int mode, int hres, int vres)
@@ -1200,6 +1177,10 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 	wii_mode_dimensions(orig_mode, orig_h, orig_v, &orig_h, &orig_v);
 
 	wii_hd_video_downgraded = 0;
+	wii_render_hres = 0;
+	wii_render_vres = 0;
+	wii_render_scale_h = 1.0f;
+	wii_render_scale_v = 1.0f;
 
 	pixels = wii_mode_pixels(*mode, hres ? *hres : 0, vres ? *vres : 0);
 	if(pixels <= WII_SAFE_VIDEO_PIXELS)

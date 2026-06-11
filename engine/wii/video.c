@@ -41,6 +41,12 @@ static int stretch = 0;
 
 extern s_videomodes videomodes;
 
+#if WII
+extern int wii_hd_video_downgraded;
+extern short wii_render_hres;
+extern short wii_render_vres;
+#endif
+
 static int brightness = 0;
 static int brightness_update = 0;
 static int _gamma = 0;
@@ -279,14 +285,17 @@ int video_copy_screen(s_screen* src)
 		return 0;
 	}
 
-	/* Keep GX texture size in sync with the game framebuffer (e.g. HD->320x240 downgrade). */
+	/* Keep GX texture size in sync with the render framebuffer only (not logic videomodes.hRes). */
 	if(src->width != textureWidth || src->height != textureHeight)
 	{
-		printf("[WIIVIDEO] texture mismatch: src=%dx%d tex=%dx%d -> resync videomode\n",
-			src->width, src->height, textureWidth, textureHeight);
-		videomodes.hRes = (short)src->width;
-		videomodes.vRes = (short)src->height;
-		if(!video_set_mode(videomodes))
+		s_videomodes tvm = videomodes;
+
+		printf("[WIIVIDEO] texture mismatch: src=%dx%d tex=%dx%d logic=%dx%d -> resync texture\n",
+			src->width, src->height, textureWidth, textureHeight,
+			videomodes.hRes, videomodes.vRes);
+		tvm.hRes = (short)src->width;
+		tvm.vRes = (short)src->height;
+		if(!video_set_mode(tvm))
 		{
 			return 0;
 		}

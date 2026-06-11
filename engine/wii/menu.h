@@ -15,6 +15,10 @@ void Menu();
 void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres);
 void wii_hd_scale_videomode_down(int *videoMode);
 extern int wii_hd_video_downgraded;
+extern short wii_render_hres;
+extern short wii_render_vres;
+extern float wii_render_scale_h;
+extern float wii_render_scale_v;
 #endif
 
 #endif

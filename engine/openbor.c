@@ -21580,7 +21580,7 @@ void goto_mainmenu(int flag)
 void static backto_mainmenu()
 {
     int i = 0;
-    s_screen *pausebuffer = allocscreen(videomodes.hRes, videomodes.vRes, PIXEL_32);
+    s_screen *pausebuffer = allocscreen(vscreen->width, vscreen->height, PIXEL_32);
 
     copyscreen(pausebuffer, vscreen);
     spriteq_draw(pausebuffer, 0, MIN_INT, MAX_INT, 0, 0);
@@ -21620,7 +21620,7 @@ void pausemenu()
     int controlp = 0, i;
     int newkeys;
     s_set_entry *set = levelsets + current_set;
-    s_screen *pausebuffer = allocscreen(videomodes.hRes, videomodes.vRes, PIXEL_32);
+    s_screen *pausebuffer = allocscreen(vscreen->width, vscreen->height, PIXEL_32);
 
     copyscreen(pausebuffer, vscreen);
     spriteq_draw(pausebuffer, 0, MIN_INT, MAX_INT, 0, 0);
@@ -22631,7 +22631,21 @@ void update_loading(s_loadingbar *s,  int value, int max)
             {
                 if(background)
                 {
-                    putscreen(vscreen, background, 0, 0, NULL);
+#if WII
+                    if(wii_hd_video_downgraded)
+                    {
+                        s_drawmethod bgdm = plainmethod;
+                        bgdm.scalex = (int)(256 * wii_render_scale_h);
+                        bgdm.scaley = (int)(256 * wii_render_scale_v);
+                        if(bgdm.scalex < 1) bgdm.scalex = 1;
+                        if(bgdm.scaley < 1) bgdm.scaley = 1;
+                        putscreen(vscreen, background, 0, 0, &bgdm);
+                    }
+                    else
+#endif
+                    {
+                        putscreen(vscreen, background, 0, 0, NULL);
+                    }
                 }
                 else
                 {
@@ -49076,11 +49090,34 @@ VIDEOMODES:
 
     video_stretch(savedata.stretch);
 
+#if WII
+    if(wii_hd_video_downgraded && wii_render_hres > 0 && wii_render_vres > 0)
+    {
+        if((vscreen = allocscreen(wii_render_hres, wii_render_vres, PIXEL_32)) == NULL)
+        {
+            borShutdown(1, "Not enough memory!\n");
+        }
+    }
+    else
+#endif
     if((vscreen = allocscreen(videomodes.hRes, videomodes.vRes, PIXEL_32)) == NULL)
     {
         borShutdown(1, "Not enough memory!\n");
     }
     videomodes.pixel = pixelbytes[(int)vscreen->pixelformat];
+#if WII
+    if(wii_hd_video_downgraded && wii_render_hres > 0 && wii_render_vres > 0)
+    {
+        s_videomodes tvm = videomodes;
+        tvm.hRes = wii_render_hres;
+        tvm.vRes = wii_render_vres;
+        if(!video_set_mode(tvm))
+        {
+            borShutdown(1, "Unable to set video mode: %d x %d!\n", tvm.hRes, tvm.vRes);
+        }
+    }
+    else
+#endif
     if(!video_set_mode(videomodes))
     {
         borShutdown(1, "Unable to set video mode: %d x %d!\n", videomodes.hRes, videomodes.vRes);
@@ -49090,13 +49127,12 @@ VIDEOMODES:
     {
         video_stretch(1);
     }
-    printf("[VIDINIT] final: mode=%d hRes=%d vRes=%d hScale=%.2f vScale=%.2f hShift=%d vShift=%d dOffset=%d\n",
+    printf("[VIDINIT] final: mode=%d logic=%dx%d render=%dx%d scale=%.3f hScale=%.2f vScale=%.2f\n",
         videoMode, videomodes.hRes, videomodes.vRes,
-        videomodes.hScale, videomodes.vScale,
-        videomodes.hShift, videomodes.vShift, videomodes.dOffset);
-    printf("[VIDINIT] vscreen=%dx%d pixel=%d stretch=%d hd_downgraded=%d BGHEIGHT=%d PLAYER_Z=%d..%d\n",
-        vscreen->width, vscreen->height, videomodes.pixel,
-        savedata.stretch, wii_hd_video_downgraded,
+        vscreen->width, vscreen->height, wii_render_scale_h,
+        videomodes.hScale, videomodes.vScale);
+    printf("[VIDINIT] hd_downgraded=%d stretch=%d BGHEIGHT=%d PLAYER_Z=%d..%d\n",
+        wii_hd_video_downgraded, savedata.stretch,
         BGHEIGHT, PLAYER_MIN_Z, PLAYER_MAX_Z);
 #endif
     clearscreen(vscreen);

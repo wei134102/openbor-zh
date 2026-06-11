@@ -19,6 +19,8 @@ extern short wii_render_hres;
 extern short wii_render_vres;
 extern float wii_render_scale_h;
 extern float wii_render_scale_v;
+extern int wii_deferred_model_load;
+void wii_apply_deferred_model_policy(int load_count);
 #endif
 
 #endif

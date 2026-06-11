@@ -5122,6 +5122,15 @@ int is_model_cache_index_selectable(int cache_index)
 }
 
 #if WII
+static int wii_path_is_player_dir(const char *path)
+{
+	if(path == NULL)
+	{
+		return 0;
+	}
+	return strstr(path, "/players/") != NULL || strstr(path, "\\players\\") != NULL;
+}
+
 static s_model *wii_findmodel_autoload(char *modelname)
 {
 	int index;
@@ -5159,8 +5168,7 @@ static int wii_is_selectable_player_cache_index(int cache_index)
 		{
 			return 0;
 		}
-		if(stristr(model_cache[cache_index].path, "/players/") == NULL
-			&& stristr(model_cache[cache_index].path, "\\players\\") == NULL)
+		if(wii_path_is_player_dir(model_cache[cache_index].path) == 0)
 		{
 			return 0;
 		}
@@ -5183,6 +5191,17 @@ static int wii_is_selectable_player_cache_index(int cache_index)
 	return is_model_selectable(model_cache[cache_index].model);
 }
 #endif
+
+static int player_cache_index_selectable(int cache_index)
+{
+#if WII
+	if(wii_deferred_model_load)
+	{
+		return wii_is_selectable_player_cache_index(cache_index);
+	}
+#endif
+	return is_model_cache_index_selectable(cache_index);
+}
 
 // Caskey, Damon V.
 // 2019-01-02
@@ -5233,11 +5252,7 @@ int find_selectable_model_count()
 	// model.
 	for (i = 0; i < models_cached; i++)
 	{
-#if WII
-		if(wii_is_selectable_player_cache_index(i))
-#else
-		if (is_model_cache_index_selectable(i))
-#endif
+		if (player_cache_index_selectable(i))
 		{
 			++result;
 		}
@@ -5277,11 +5292,7 @@ s_model *nextplayermodel(s_model *current)
         }
 
 		// If valid and selectable, return the model.
-#if WII
-        if(wii_is_selectable_player_cache_index(i))
-#else
-        if(is_model_cache_index_selectable(i))
-#endif
+        if(player_cache_index_selectable(i))
         {
 			//printf("next %s\n", model_cache[i].model->name);
 			return model_cache[i].model;            
@@ -5361,11 +5372,7 @@ s_model *prevplayermodel(s_model *current)
         }
 
 		// If valid and selectable, return the model.
-#if WII
-        if(wii_is_selectable_player_cache_index(i))
-#else
-        if(is_model_cache_index_selectable(i))
-#endif
+        if(player_cache_index_selectable(i))
         {
             //printf("prev %s\n", model_cache[i].model->name);
             return model_cache[i].model;
@@ -18372,6 +18379,11 @@ int load_models()
     // Defer load_cached_model, so you can define models after their nested model.
     printf("\n");
 
+#if WII
+    wii_apply_deferred_model_policy(modelLoadCount);
+    set_findmodel_autoload(wii_deferred_model_load ? wii_findmodel_autoload : NULL);
+#endif
+
     for(i = 0, pos = 0; i < models_cached; i++)
     {
         //printf("Checking '%s' '%s'\n", model_cache[i].name, model_cache[i].path);
@@ -18380,9 +18392,17 @@ int load_models()
             global_model = i;
         }
 #if WII
-        if(stricmp(model_cache[i].name, "global_model") == 0)
+        if(wii_deferred_model_load)
+        {
+            if(stricmp(model_cache[i].name, "global_model") == 0)
+            {
+                load_cached_model(model_cache[i].name, "models.txt", 0);
+            }
+        }
+        else if(model_cache[i].loadflag)
         {
             load_cached_model(model_cache[i].name, "models.txt", 0);
+            update_loading(&loadingbg[0], ++pos, modelLoadCount);
         }
 #else
         if(model_cache[i].loadflag)
@@ -18393,8 +18413,15 @@ int load_models()
 #endif
     }
 #if WII
-    printf("[WII] Deferred model loading: %d registered, %d startup loads skipped (lazy on demand)\n",
-        models_cached, modelLoadCount);
+    if(wii_deferred_model_load)
+    {
+        printf("[WII] Deferred model loading: %d registered, %d startup loads skipped (lazy on demand)\n",
+            models_cached, modelLoadCount);
+    }
+    else
+    {
+        printf("[WII] Standard model loading: %d models preloaded at startup\n", modelLoadCount);
+    }
     getRamStatus(BYTES);
 #endif
     printf("\nLoading models...............\tDone!\n");
@@ -46841,9 +46868,6 @@ void startup()
     printf("Done!\n");
 
     printf("Loading models...............\n\n");
-#if WII
-    set_findmodel_autoload(wii_findmodel_autoload);
-#endif
     load_models();
 
     printf("Object engine init...........\t");

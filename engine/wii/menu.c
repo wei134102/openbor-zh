@@ -966,6 +966,11 @@ short wii_render_vres = 0;
 float wii_render_scale_h = 1.0f;
 float wii_render_scale_v = 1.0f;
 
+/* Below this load count, use original full startup load (small mods unchanged). */
+#define WII_DEFER_MODEL_THRESHOLD 80
+
+int wii_deferred_model_load = 0;
+
 #define WII_HD_MAX_OPTIONS 12
 
 typedef struct
@@ -1341,6 +1346,69 @@ void wii_apply_hd_videomode_policy(int *mode, short *hres, short *vres)
 		wii_hd_video_downgraded = 1;
 		wii_hd_log_state("user chose render buffer", orig_mode, orig_h, orig_v, 1, "scaled draw after VIDEOMODES");
 	}
+}
+#endif
+
+#if WII
+static int wii_deferred_model_prompt(int load_count)
+{
+	int done = 0;
+	int defer = 1;
+
+	if(CONF_GetAspectRatio() == CONF_ASPECT_16_9)
+	{
+		isWide = 1;
+	}
+	else
+	{
+		isWide = 0;
+	}
+
+	setVideoMode();
+	initMenu(1);
+
+	while(!done)
+	{
+		copyScreens(Source);
+		printText((isWide ? 40 : 12), (isWide ? 52 : 44), YELLOW, 0, 0, MENU_STR_DEFER_TITLE);
+		printText((isWide ? 40 : 12), (isWide ? 68 : 60), ORANGE, 0, 0, MENU_STR_DEFER_INFO, load_count);
+		printText((isWide ? 40 : 12), (isWide ? 96 : 86), GREEN, 0, 0, MENU_STR_DEFER_YES);
+		printText((isWide ? 40 : 12), (isWide ? 112 : 102), PURPLE, 0, 0, MENU_STR_DEFER_NO);
+		drawScreens(NULL, 0, 0);
+
+		refreshInput();
+		if(buttonsPressed & (WIIMOTE_A | WIIMOTE_1 | WIIMOTE_PLUS | CC_A | CC_PLUS | GC_A | GC_START))
+		{
+			defer = 1;
+			done = 1;
+		}
+		else if(buttonsPressed & (WIIMOTE_B | NUNCHUK_Z | CC_B | GC_B))
+		{
+			defer = 0;
+			done = 1;
+		}
+	}
+
+	termMenu();
+	return defer;
+}
+
+void wii_apply_deferred_model_policy(int load_count)
+{
+	wii_deferred_model_load = 0;
+
+	if(load_count < WII_DEFER_MODEL_THRESHOLD)
+	{
+		printf("[DEFER] small mod: %d models (<%d) -> standard full load\n",
+			load_count, WII_DEFER_MODEL_THRESHOLD);
+		return;
+	}
+
+	printf("[DEFER] large mod: %d models (>=%d) -> prompt user\n",
+		load_count, WII_DEFER_MODEL_THRESHOLD);
+	wii_deferred_model_load = wii_deferred_model_prompt(load_count);
+	printf("[DEFER] user chose: %s\n",
+		wii_deferred_model_load ? "deferred lazy load" : "full preload");
 }
 #endif
 

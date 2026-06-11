@@ -38,8 +38,12 @@
 #include "savedata.h"
 #include "List.h"
 
-#if WIN || LINUX
+#if WIN || LINUX || WII
 #include <dirent.h>
+#endif
+
+#if !WIN
+#include <unistd.h>
 #endif
 
 #if _POSIX_SOURCE
@@ -72,6 +76,8 @@ static const size_t USED_FLAG = (((size_t) 1) << ((sizeof(size_t) * 8) - 1));
 
 static int pak_initialized;
 int printFileUsageStatistics = 0;
+int packfile_loose_mod = 0;
+static char packfile_startup_cwd[PACKFILE_PATH_MAX];
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -1063,6 +1069,19 @@ void pak_term()
     {
         return;
     }
+
+    if(packfile_loose_mod)
+    {
+        if(packfile_startup_cwd[0] != '\0')
+        {
+            chdir(packfile_startup_cwd);
+        }
+        packfile_loose_mod = 0;
+        packfile_startup_cwd[0] = '\0';
+        pak_initialized = 0;
+        return;
+    }
+
     if(pak_cdheader != NULL)
     {
         free(pak_cdheader);
@@ -1096,6 +1115,29 @@ int pak_init()
     if(pak_initialized)
     {
         printf("pak_init already initialized!");
+        return 0;
+    }
+
+    packfile_loose_mod = 0;
+    packfile_startup_cwd[0] = '\0';
+
+    /*
+     * Folder mod: Paks/<GameName>/data/...
+     * Read files from SD on demand (no .pak container, no pack cache in RAM).
+     */
+    if(packfile_is_loose_mod_root(packfile))
+    {
+        getBasePath(packfile_startup_cwd, "", 0);
+        if(chdir(packfile) != 0)
+        {
+            printf("Loose mod: chdir failed for '%s'\n", packfile);
+            return 0;
+        }
+
+        packfile_loose_mod = 1;
+        packfile_mode(0);
+        pak_initialized = 1;
+        printf("Loose data mod: '%s' (files streamed from SD)\n", packfile);
         return 0;
     }
 
@@ -1223,16 +1265,62 @@ int packfileeof(int handle)
 
 /////////////////////////////////////////////////////////////////////////////
 
+int packfile_is_loose_mod_root(const char *rootpath)
+{
+    char probe[PACKFILE_PATH_MAX];
+    size_t len;
+
+    if(rootpath == NULL || rootpath[0] == '\0')
+    {
+        return 0;
+    }
+
+    len = strlen(rootpath);
+    if(len + 20 >= sizeof(probe))
+    {
+        return 0;
+    }
+
+    strcpy(probe, rootpath);
+    if(probe[len - 1] != '/' && probe[len - 1] != '\\')
+    {
+        strcat(probe, "/");
+    }
+    strcat(probe, "data/models.txt");
+    return fileExists(probe);
+}
+
+static int packfile_is_loose_mod_name(const char *name)
+{
+    char rootpath[PACKFILE_PATH_MAX];
+
+    if(name == NULL || name[0] == '\0')
+    {
+        return 0;
+    }
+
+    getBasePath(rootpath, name, 1);
+    return packfile_is_loose_mod_root(rootpath);
+}
+
 int packfile_supported(const char *filename)
 {
-    if(stricmp(filename, "menu.pak") != 0)
+    if(filename == NULL || filename[0] == '\0')
     {
-        if (stristr(filename, ".pak"))
-        {
-            return 1;
-        }
+        return 0;
     }
-    return 0;
+
+    if(stricmp(filename, "menu.pak") == 0)
+    {
+        return 0;
+    }
+
+    if(stristr(filename, ".pak"))
+    {
+        return 1;
+    }
+
+    return packfile_is_loose_mod_name(filename);
 }
 
 /////////////////////////////////////////////////////////////////////////////

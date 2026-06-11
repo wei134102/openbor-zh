@@ -3526,6 +3526,7 @@ typedef struct
     s_model *model;
     int loadflag;
     int selectable;
+    e_entity_type peek_type; /* parsed from model txt at cache time (no sprite load) */
 } s_modelcache;
 extern s_modelcache *model_cache;
 

@@ -55,6 +55,9 @@ typedef struct fileliststruct
 #define testpackfile(filename, packfilename) closepackfile(openpackfile(filename, packfilename))
 
 extern int printFileUsageStatistics;
+extern int packfile_loose_mod;
+
+int packfile_is_loose_mod_root(const char *rootpath);
 
 // All of these return -1 on error
 int openpackfile(const char *filename, const char *packfilename);

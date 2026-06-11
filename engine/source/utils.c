@@ -298,8 +298,21 @@ void getPakName(char *name, int type)
 
     int i, x, y;
     char mod[256] = {""};
+    size_t modlen;
 
-    memcpy(mod, packfile, strlen(packfile) - 4);
+    if(packfile_loose_mod)
+    {
+        strcpy(mod, packfile);
+        modlen = strlen(mod);
+        while(modlen > 0 && (mod[modlen - 1] == '/' || mod[modlen - 1] == '\\'))
+        {
+            mod[--modlen] = '\0';
+        }
+    }
+    else
+    {
+        memcpy(mod, packfile, strlen(packfile) - 4);
+    }
 
     switch(type)
     {

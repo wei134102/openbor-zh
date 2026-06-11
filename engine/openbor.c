@@ -5122,15 +5122,6 @@ int is_model_cache_index_selectable(int cache_index)
 }
 
 #if WII
-static int wii_path_is_player_dir(const char *path)
-{
-	if(path == NULL)
-	{
-		return 0;
-	}
-	return strstr(path, "/players/") != NULL || strstr(path, "\\players\\") != NULL;
-}
-
 static s_model *wii_findmodel_autoload(char *modelname)
 {
 	int index;
@@ -5164,11 +5155,18 @@ static int wii_is_selectable_player_cache_index(int cache_index)
 
 	if(!model_cache[cache_index].model)
 	{
-		if(!model_cache[cache_index].loadflag)
+		if(allowselect_args[0] == 'a' || allowselect_args[0] == 'A')
+		{
+			if(!model_cache[cache_index].selectable)
+			{
+				return 0;
+			}
+		}
+		else if(model_cache[cache_index].peek_type != TYPE_PLAYER)
 		{
 			return 0;
 		}
-		if(wii_path_is_player_dir(model_cache[cache_index].path) == 0)
+		if(!model_cache[cache_index].loadflag)
 		{
 			return 0;
 		}
@@ -5427,6 +5425,20 @@ static void reset_playable_list(char which)
     int i;
     for(i = 0; i < models_cached; i++)
     {
+#if WII
+        if(wii_deferred_model_load && which)
+        {
+            if(model_cache[i].peek_type == TYPE_PLAYER)
+            {
+                model_cache[i].selectable = which;
+            }
+            else if(model_cache[i].model && model_cache[i].model->type == TYPE_PLAYER)
+            {
+                model_cache[i].selectable = which;
+            }
+        }
+        else
+#endif
         if(!which || (model_cache[i].model && model_cache[i].model->type == TYPE_PLAYER))
         {
             model_cache[i].selectable = which;
@@ -5461,7 +5473,10 @@ static void load_playable_list(char *buf)
     for(i = 1; (value = GET_ARG(i))[0]; i++)
     {
         playermodels = findmodel(value);
-        //if(playermodels == NULL) borShutdown(1, "Player model '%s' is not loaded.\n", value);
+        if(playermodels == NULL)
+        {
+            borShutdown(1, "Player model '%s' is not loaded.\n", value);
+        }
         index = get_cached_model_index(playermodels->name);
         if(index == -1)
         {
@@ -9437,9 +9452,7 @@ int addframe(s_addframe_data* data)
 }
 
 
-// ok this func only seems to overwrite the name which was assigned from models.txt with the one
-// in the models own text file.
-// it does so in the cache.
+// Read name/type from a model txt without loading sprites (for deferred loading).
 void _peek_model_name(int index)
 {
     size_t size = 0;
@@ -9449,6 +9462,9 @@ void _peek_model_name(int index)
     ArgList arglist;
     char argbuf[MAX_ARG_LEN + 1] = "";
     modelCommands cmd;
+    int got_name = 0;
+
+    model_cache[index].peek_type = TYPE_UNDELCARED;
 
     if(buffer_pakfile(model_cache[index].path, &buf, &size) != 1)
     {
@@ -9472,10 +9488,19 @@ void _peek_model_name(int index)
                 model_cache[index].name = malloc(len + 1);
                 strcpy(model_cache[index].name, value);
                 model_cache[index].name[len] = 0;
-                break;
+                got_name = 1;
+            }
+            else if(cmd == CMD_MODEL_TYPE)
+            {
+                model_cache[index].peek_type = get_type_from_string(GET_ARG(1));
             }
         }
         pos += getNewLineStart(buf + pos);
+
+        if(got_name && model_cache[index].peek_type != TYPE_UNDELCARED)
+        {
+            break;
+        }
     }
 
     if(buf != NULL)

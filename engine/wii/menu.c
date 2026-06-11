@@ -791,11 +791,25 @@ void drawMenu()
 		{
 			shift = 0;
 			colors = GRAY;
-			strncpy(listing, "", (isWide ? 44 : 28));
-			if(strlen(filelist[list+dListScrollPosition].filename)-4 < (isWide ? 44 : 28))
-				safe_strncpy(listing, filelist[list+dListScrollPosition].filename, strlen(filelist[list+dListScrollPosition].filename)-4);
-			if(strlen(filelist[list+dListScrollPosition].filename)-4 > (isWide ? 44 : 28))
-				safe_strncpy(listing, filelist[list+dListScrollPosition].filename, (isWide ? 44 : 28));
+			{
+				const char *entryname = filelist[list + dListScrollPosition].filename;
+				size_t entrylen = strlen(entryname);
+				size_t showlen = entrylen;
+
+				strncpy(listing, "", (isWide ? 44 : 28));
+				if(stristr(entryname, ".pak") && entrylen > 4)
+				{
+					showlen = entrylen - 4;
+				}
+				if(showlen < (size_t)(isWide ? 44 : 28))
+				{
+					safe_strncpy(listing, entryname, showlen);
+				}
+				else
+				{
+					safe_strncpy(listing, entryname, (isWide ? 44 : 28));
+				}
+			}
 			if(list == dListCurrentPosition)
 			{
 				shift = 2;

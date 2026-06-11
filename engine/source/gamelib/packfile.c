@@ -1293,13 +1293,15 @@ int packfile_is_loose_mod_root(const char *rootpath)
 static int packfile_is_loose_mod_name(const char *name)
 {
     char rootpath[PACKFILE_PATH_MAX];
+    char entryname[MAX_FILENAME_LEN];
 
     if(name == NULL || name[0] == '\0')
     {
         return 0;
     }
 
-    getBasePath(rootpath, name, 1);
+    safe_strncpy(entryname, name, sizeof(entryname) - 1);
+    getBasePath(rootpath, entryname, 1);
     return packfile_is_loose_mod_root(rootpath);
 }
 
